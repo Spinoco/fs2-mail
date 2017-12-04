@@ -169,6 +169,7 @@ object SMTPClient {
 
 
     private val crlf: ByteVector = ByteVector.view("\r\n".getBytes)
+    private val boundaryDelimiter: ByteVector = ByteVector.view("--".getBytes)
 
     /**
       * Read response lines of input as they come in. Lines are expected to be terminated with \r\n and
@@ -467,11 +468,17 @@ object SMTPClient {
       // body parts the boundary followed by encoded part.
       // after each part the boundary must be encoded too
       def encodeMulti(multi: MultiPart[F]): Stream[F, Byte] = {
-        lazy val boundaryChunk: Stream[F, Byte] = Stream.chunk(ByteVectorChunk(crlf ++ ByteVector.view(multi.boundary.getBytes) ++ crlf))
+        lazy val boundaryChunk: Stream[F, Byte] = Stream.chunk(ByteVectorChunk(crlf ++ boundaryDelimiter ++ ByteVector.view(multi.boundary.getBytes)))
+        lazy val crlfChunk: Stream[F, Byte] = Stream.chunk(ByteVectorChunk(crlf))
 
         encodeHeader("mime multi-part header", multi.header, mimeHeaderCodec) ++
-        boundaryChunk ++ multi.parts.flatMap { part =>
-          encode(part) ++ boundaryChunk
+        boundaryChunk ++
+        crlfChunk ++
+        multi.parts.zipWithNext.flatMap{ case (part, next) =>
+          encode(part) ++
+          next.fold(boundaryChunk ++ Stream.chunk(ByteVectorChunk(boundaryDelimiter)) ++ crlfChunk)(_ =>
+            boundaryChunk ++ crlfChunk
+          )
         }
       }
 

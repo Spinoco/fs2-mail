@@ -159,6 +159,8 @@ object MIMEPart {
     *
     * @param fallback       A content that is used as fallback (i.e. text/plain) if none of the alternatives work.
     * @param alternative    An alternative content to send (i.e. text/html)
+    * @param boundary       A boundary string denoting one part. This string cannot be longer than 70 characters and must not
+    *                       contain any whitespaces.
     */
   def alternate[F[_]](
     fallback: SinglePart[F]
@@ -167,6 +169,21 @@ object MIMEPart {
   ): MultiPart[F] =
     multipart(subtype = "alternate", parts = Stream(fallback, alternative), boundary = boundary)
 
+  /**
+    * Creates a MIME part with mixed message content.
+    *
+    * The separate parts will be displayed in sequence. The inner parts will be displayed properly, meaning
+    * if there is an alternative in the mixed parts, the alternative will work as if it were on top level.
+    *
+    * @param parts    The parts to make this mixed type
+    * @param boundary A boundary string denoting one part. This string cannot be longer than 70 characters and must not
+    *                 contain any whitespaces.
+    */
+  def mixed[F[_]](
+    parts: Stream[F, MIMEPart[F]]
+    , boundary: => String = s"---${ UUID.randomUUID() }---${ UUID.randomUUID() }---"
+  ): MultiPart[F] =
+    multipart(subtype = "mixed", parts = parts, boundary = boundary)
 
   /**
     * Creates a multipart with supplied subtype and encoding.
@@ -174,7 +191,8 @@ object MIMEPart {
     * @param subtype    Subtype (i.e. alternate/mixed)
     * @param encoding   Encoding (note the 7Bit, 8Bit, Binary must be used according to RFC
     * @param parts      Parts to include in this mime part. Parts may be nested.
-    * @param boundary   Boundary id separating parts
+    * @param boundary   A boundary string denoting one part. This string cannot be longer than 70 characters and must not
+    *                   contain any whitespaces.
     */
   def multipart[F[_]](
     subtype: String
@@ -193,9 +211,5 @@ object MIMEPart {
       , parts = parts
     )
   }
-
-
-
-
 
 }

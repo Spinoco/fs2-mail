@@ -68,7 +68,7 @@ object MIMEEncodeMultipartSpec extends Properties("MIMEEncodeMultipart") {
       |Content-Type: multipart/alternate; boundary=----boundary---
       |Content-Transfer-Encoding: 8bit
       |
-      |----boundary---
+      |------boundary---
       |Content-Type: text/html; charset=utf-8
       |Content-Transfer-Encoding: quoted-printable
       |
@@ -80,7 +80,7 @@ object MIMEEncodeMultipartSpec extends Properties("MIMEEncodeMultipart") {
       |=C3=BD </div>
       |  </body>
       |</html>
-      |----boundary---
+      |------boundary---
       |Content-Type: text/plain; charset=utf-8
       |Content-Transfer-Encoding: quoted-printable
       |
@@ -92,7 +92,7 @@ object MIMEEncodeMultipartSpec extends Properties("MIMEEncodeMultipart") {
       |. Dot starting line
       |--- end
       |
-      |----boundary---
+      |------boundary-----
       |
       |""".stripMargin.lines.mkString("\r\n")
 
@@ -138,11 +138,11 @@ object MIMEEncodeMultipartSpec extends Properties("MIMEEncodeMultipart") {
         |Content-Type: multipart/mixed; boundary=---mixed-boundary---
         |Content-Transfer-Encoding: 8bit
         |
-        |---mixed-boundary---
+        |-----mixed-boundary---
         |Content-Type: multipart/alternate; boundary=----alt-boundary---
         |Content-Transfer-Encoding: 8bit
         |
-        |----alt-boundary---
+        |------alt-boundary---
         |Content-Type: text/html; charset=utf-8
         |Content-Transfer-Encoding: quoted-printable
         |
@@ -154,7 +154,7 @@ object MIMEEncodeMultipartSpec extends Properties("MIMEEncodeMultipart") {
         |=C3=BD </div>
         |  </body>
         |</html>
-        |----alt-boundary---
+        |------alt-boundary---
         |Content-Type: text/plain; charset=utf-8
         |Content-Transfer-Encoding: quoted-printable
         |
@@ -166,9 +166,9 @@ object MIMEEncodeMultipartSpec extends Properties("MIMEEncodeMultipart") {
         |. Dot starting line
         |--- end
         |
-        |----alt-boundary---
+        |------alt-boundary-----
         |
-        |---mixed-boundary---
+        |-----mixed-boundary---
         |Content-Type: image/jpeg
         |Content-Transfer-Encoding: base64
         |Content-ID: jpeg-picture
@@ -194,7 +194,7 @@ object MIMEEncodeMultipartSpec extends Properties("MIMEEncodeMultipart") {
         |  qOkpaanqKmqq6ytrq+wsbKztLW2t7i5uru8vb6/wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2N
         |  na29zd3t/g4eLj5OXm5w==
         |
-        |---mixed-boundary---
+        |-----mixed-boundary-----
         |
         |""".stripMargin.lines.mkString("\r\n")
   }
