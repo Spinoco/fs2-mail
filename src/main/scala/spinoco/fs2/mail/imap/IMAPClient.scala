@@ -155,17 +155,14 @@ object IMAPClient {
     Stream.eval(async.boundedQueue[F, IMAPData](bufferLines)) flatMap { incomingQ =>
 
       val received =
-        Stream.eval_(F.delay{ println("STARTING THE RECEIVED RUNNER ")}) ++
-          ((
-            socket.reads(maxReadBytes, None) through
-            lines map { s => println(s">>> $s") ; s } through
-            incomingQ.enqueue
-          ) interruptWhen terminated)
-          .onError(err => Stream.eval_(F.delay(println(s"FAILED: $err"))) ++ Stream.fail(err))
-          .onFinalize { F.delay { println("DONE WITH RUNNER") }}
+        (
+          socket.reads(maxReadBytes, None) through
+          lines through
+          incomingQ.enqueue
+        ) interruptWhen terminated
 
       val handshakeInitial =
-        incomingQ.dequeue through concatLines takeWhile { ! _.startsWith("* OK") } onFinalize (requestSemaphore.increment map { _ => println("RELEASED RQ LOCK") })
+        incomingQ.dequeue through concatLines takeWhile { ! _.startsWith("* OK") } onFinalize (requestSemaphore.increment)
 
       def send(line: String): F[Unit] =
         socket.write(Chunk.bytes(line.getBytes), None)
@@ -284,7 +281,6 @@ object IMAPClient {
       Stream.eval_(requestSemaphore.decrement) ++
       Stream.eval(idxRef.modify { _ + 1 } map { c => java.lang.Long.toHexString(c.now) }) flatMap { tag =>
         val commandLine = s"$tag ${cmd.asIMAPv4}\r\n"
-        println(s"<<<: $commandLine")
 
         def unlock = Stream.eval(requestSemaphore.increment)
 
@@ -298,10 +294,10 @@ object IMAPClient {
             } else {
               Stream(Right(
                 Stream.emit[F, IMAPData](IMAPText(resp)) ++
-                tail map { x => println(s"QQQQ $x"); x } takeThrough {
+                tail.takeThrough {
                   case IMAPText(l) => ! l.startsWith(tag)
                   case _  => true
-                } dropLastIf {
+                }.dropLastIf {
                   case IMAPText(l) => l.startsWith(tag)
                   case _ => false
                 } onFinalize { requestSemaphore.increment }
@@ -336,7 +332,6 @@ object IMAPClient {
           (s through concatLines).runLog map { acc =>
             acc.map { s =>
               val line = s.dropWhile { c => c != '*'}
-              println(s"XXXX $line")
               if (line.headOption.contains('*')) line.tail
               else  line
             }
@@ -377,12 +372,18 @@ object IMAPClient {
       }
 
     /** parses reult of FETCH xyz (BODYSTRUCTURE) request **/
-    def parseBodyStructure[F[_]](lines: Seq[String])(implicit F: Effect[F]): F[Seq[EmailBodyPart]] =  {
-      IMAPBodyPartCodec.bodyStructure.decode(BitVector.view(lines.mkString.getBytes)) match {
-        case Attempt.Successful(result) => F.pure(EmailBodyPart.flatten(result.value))
-        case Attempt.Failure(err) => F.fail(new Throwable(s"failed to decode BODYSTRUCTURE: $err ($lines)"))
+    def parseBodyStructure[F[_]](lines: Seq[String])(implicit F: Effect[F]): F[Seq[EmailBodyPart]] = {
+      val line = lines.mkString
+      val indexStart = line.indexOf("(")
+      if (indexStart < 0) F.fail(new Throwable("Could not find start of body structure."))
+      else {
+        IMAPBodyPartCodec.bodyStructure.decode(BitVector.view(line.drop(indexStart).getBytes)) match {
+          case Attempt.Successful(result) => F.pure(EmailBodyPart.flatten(result.value))
+          case Attempt.Failure(err) => F.fail(new Throwable(s"failed to decode BODYSTRUCTURE: $err ($lines)"))
+        }
       }
     }
+
 
 
 
@@ -565,10 +566,11 @@ object IMAPClient {
       def collectBytes( recordIdx: Int, key: String, in: Stream[F, IMAPData]): Stream[F, (Int, String, IMAPData)] = {
         def go(curr: Stream[F, IMAPData]): Stream[F, (Int, String, IMAPData)] = {
           curr.uncons1 flatMap {
-            case Some((d@IMAPBytes(bs), tail)) =>
+            case Some((d: IMAPBytes, tail)) =>
               Stream.emit((recordIdx, key, d)) ++ go(tail)
 
-            case Some((IMAPText(l), _)) => findEntry(recordIdx, curr)
+            case Some((d: IMAPText, tail)) =>
+              findEntry(recordIdx, Stream.emit(d) ++ tail)
 
             case None =>
               Stream.fail(new Throwable(s"Expected end of bytes for record: $recordIdx, key: $key, but EOF reached"))
@@ -579,7 +581,7 @@ object IMAPClient {
           case Some((d@IMAPBytes(bs), tail)) =>
             Stream.emit((recordIdx, key, d)) ++ go(tail)
 
-          case Some((IMAPText(l), tail)) =>
+          case Some((IMAPText(l), _)) =>
             Stream.fail(new Throwable(s"Expected bytes for record: $recordIdx, key: $key, but got $l"))
 
           case None =>
@@ -743,9 +745,5 @@ object IMAPClient {
 
       s => collectLines(ByteVector.empty, s).scope
     }
-
-
-
   }
-
 }
