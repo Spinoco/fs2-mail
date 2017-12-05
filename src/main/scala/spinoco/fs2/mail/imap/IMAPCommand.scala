@@ -12,11 +12,11 @@ object IMAPCommand {
   }
 
   final case object Logout extends IMAPCommand {
-    def asIMAPv4: String = s"LOGOUT"
+    def asIMAPv4: String = "LOGOUT"
   }
 
   final case object Capability extends IMAPCommand {
-    def asIMAPv4: String = s"CAPABILITY"
+    def asIMAPv4: String = "CAPABILITY"
   }
 
   final case class ListMailbox(reference:String, wildcard: String) extends IMAPCommand {
@@ -24,18 +24,18 @@ object IMAPCommand {
   }
 
   final case class Examine(name: String @@ MailboxName) extends IMAPCommand {
-    def asIMAPv4: String = s"EXAMINE $name"
+    def asIMAPv4: String = s"""EXAMINE "$name""""
   }
 
 
   final case class Select(name: String @@ MailboxName) extends IMAPCommand {
-    def asIMAPv4: String = s"SELECT $name"
+    def asIMAPv4: String = s"""SELECT "$name""""
   }
 
   final case class Search(charset: Option[String], term: IMAPSearchTerm) extends IMAPCommand {
     def asIMAPv4: String = charset match {
       case None => s"SEARCH ${term.term}"
-      case Some(chset) => s"SEARCH CHARSET $chset $term"
+      case Some(chset) => s"SEARCH CHARSET $chset ${term.term}"
     }
   }
 
