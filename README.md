@@ -94,24 +94,31 @@ smtp.client(tlsSocket).evalMap { smtpClient =>
       , from = EmailAddress("alice", "mail.com", None)
       , to = EmailAddress("bob", "mail.com", None)
     )
-    val body: Stream[Task, Char] = Stream.chunk(StringChunk("A simple text-only emaol from fs2-mail."))
+    val body: Stream[Task, Char] = Stream.chunk(StringChunk("A simple text-only email from fs2-mail."))
 
     smtpClient.connect("gmail.com") >>
     smtpClient.login("userName", "password") >>
     smtpClient.sendText(tag[EmailAddress]("alice@mail.com"), tag[EmailAddress]("bob@mail.com"), header, body)
+    
 
+    
 }}}}.run.unsafeRun()
 
 ```
 
-Apart from sending simple emails, fs2-mail also allows to send MIME encoded (inclusive multpart) data. 
-To send such emails, that perhaps fecth their content not only from the strinctly defined dat but perhaps 
-from data stored on filesystem or central data storage following construct (replacing the `smtp.sendText` in example above)
-shall be used : 
+Apart from sending simple emails, fs2-mail also allows to send MIME encoded (inclusive multipart) data. 
+To send such emails, that perhaps fetch their content not only from the strictly defined data but perhaps 
+from data stored on filesystem or central data storage following construct (replacing the `smtp.sendText` in example above).
 
 ```scala
 
+import spinoco.protocol.mime._
+import java.nio.file.Paths
 
+val fileGifSource: Stream[F, Byte] = ??? // i.e. load from the 
+val body = MIMEPart.file("part-id", "file.gif", MediaType.`image/gif`, fs2.io.file.readAll(Paths.get("/some/file/location/file.gif")))  
+
+smtpClient.send(tag[EmailAddress]("alice@mail.com"), tag[EmailAddress]("bob@mail.com"), header, body)
 
 ```
 
@@ -122,15 +129,16 @@ download attachment (with automatical decoding according to their mime type).
 
 Minimalistic example of fetching ... 
 
+(Note this to run requires Spinoco fs2-crypto in project dependencies)
+
 ```scala
 
 import java.net.InetSocketAddress
 import java.time.ZonedDateTime
 
 import fs2._
-import fs2.util.syntax._
-import fs2.crypto.TLSEngine
-import fs2.crypto.io.tcp.TLSSocket
+import fs2.util.syntax._ 
+import spinoco.fs2.crypto.io.tcp.TLSSocket
 
 import shapeless.tag
 
@@ -139,9 +147,8 @@ import spinoco.fs2.mail.imap.MailboxName
 import spinoco.fs2.mail.imap.IMAPSearchTerm
 
 
- io.tcp.client[Task](new InetSocketAddress("imap.gmail.com", 993)).flatMap { tcpSocket =>
-  Stream.eval(TLSEngine[Task](clientTLS)) flatMap { tlsEngine =>
-  Stream.eval(TLSSocket[Task](tcpSocket, tlsEngine)) flatMap { tlsSocket =>
+ io.tcp.client[Task](new InetSocketAddress("imap.gmail.com", 993)).flatMap { tcpSocket => 
+  Stream.eval(TLSSocket[Task](tcpSocket, clientTLS)) flatMap { tlsSocket =>
   imap.client[Task](tlsSocket) evalMap { imapClient =>
     // login with supplied credentials
     imapClient.login("EMAIL", "PASSWORD") >>
@@ -159,7 +166,7 @@ import spinoco.fs2.mail.imap.IMAPSearchTerm
 
     }}}}
 
-  }}}}
+  }}}
   .run.unsafeRun
 
 ```
