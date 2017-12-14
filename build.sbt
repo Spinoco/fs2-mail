@@ -9,8 +9,8 @@ lazy val contributors = Seq(
 
 lazy val commonSettings = Seq(
   organization := "com.spinoco",
-  scalaVersion := "2.12.1",
-  crossScalaVersions := Seq("2.11.8", "2.12.1"),
+  scalaVersion := "2.12.4",
+  crossScalaVersions := Seq("2.11.11", "2.12.4"),
   scalacOptions ++= Seq(
     "-feature",
     "-deprecation",
@@ -26,10 +26,9 @@ lazy val commonSettings = Seq(
   scalacOptions in (Compile, console) ~= {_.filterNot("-Ywarn-unused-import" == _)},
   scalacOptions in (Test, console) <<= (scalacOptions in (Compile, console)),
   libraryDependencies ++= Seq(
-    "co.fs2" %% "fs2-core" % "0.9.8-SNAPSHOT"
-    , "co.fs2" %% "fs2-io" % "0.9.8-SNAPSHOT"
-    , "co.fs2" %% "fs2-crypto" % "0.9.8-SNAPSHOT"
-    , "com.spinoco" %% "protocol-mail" % "0.3.0-SNAPSHOT"
+    "co.fs2" %% "fs2-core" % "0.9.7"
+    , "co.fs2" %% "fs2-io" % "0.9.7"
+    , "com.spinoco" %% "protocol-mail" % "0.3.0"
     , "com.beetstra.jutf7" % "jutf7" % "1.0.0"
     , "org.scalacheck" %% "scalacheck" % "1.13.4" % "test"
   ),
