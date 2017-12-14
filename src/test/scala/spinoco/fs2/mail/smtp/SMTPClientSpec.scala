@@ -25,7 +25,7 @@ object SMTPClientSpec extends Properties("SMTPClient"){
     .through(SMTPClient.impl.insertDotIfNeeded)
     .chunks.map(ByteVectorChunk.asByteVector)
     .runLog
-    .map(_.reduce(_ ++ _).decodeUtf8.toOption.getOrElse("").lines.mkString("\r\n"))
+    .map(_.reduce(_ ++ _).decodeUtf8.right.toOption.getOrElse("").lines.mkString("\r\n"))
     .unsafeRun() ?=
       """Line
         |..

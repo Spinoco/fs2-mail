@@ -20,7 +20,7 @@ import spinoco.protocol.mail.header.codec.EmailHeaderCodec
 import spinoco.protocol.mail.imap.codec.IMAPBodyPartCodec
 
 import scala.collection.immutable.NumericRange
-import scala.util.Try
+import scala.util.{Failure, Success, Try}
 import scala.util.matching.Regex
 
 
@@ -512,16 +512,18 @@ object IMAPClient {
       }
 
       def getUid(m: Map[String, Vector[IMAPData]]): Either[String, Long @@ MailUID] = {
-        m.get("UID").toRight("Missing UID key") flatMap { data =>
-        asString(data) flatMap { uidStr =>
-          Try(java.lang.Long.parseLong(uidStr)).map { tag[MailUID](_)  }.toEither
-          .left.map { t => s"Failed to parse int: $uidStr (${t.getMessage}" }
+        m.get("UID").map(Right(_)).getOrElse(Left("Missing UID key")).right flatMap { data =>
+        asString(data).right flatMap { uidStr =>
+          Try(java.lang.Long.parseLong(uidStr)).map { tag[MailUID](_)  } match {
+            case Success(id) => Right(id)
+            case Failure(err) => Left(s"Failed to parse int: $uidStr (${err.getMessage}")
+          }
         }}
       }
 
       def getHeader(m: Map[String, Vector[IMAPData]]): Either[String, EmailHeader] = {
-        m.get("BODY[HEADER]").toRight("Missing BODY[HEADER] key") flatMap { data =>
-        asBytes(data) flatMap { hdrBytes =>
+        m.get("BODY[HEADER]").map(Right(_)).getOrElse(Left("Missing BODY[HEADER] key")).right flatMap { data =>
+        asBytes(data).right flatMap { hdrBytes =>
           headerCodec.decodeValue(hdrBytes.bits).toEither.left.map(_.messageWithContext)
         }}
       }
@@ -529,8 +531,8 @@ object IMAPClient {
       _ map { m =>
         (
           for {
-            uid <- getUid(m)
-            header <- getHeader(m)
+            uid <- getUid(m).right
+            header <- getHeader(m).right
           } yield IMAPEmailHeader(header, uid)
         ).left.map(err => new Throwable(s"Invalid data for email: $err  ($m)"))
       } flatMap {
@@ -723,10 +725,14 @@ object IMAPClient {
                         val num = m.group(2)
                         if (line == null || num == null) Stream.fail(new Throwable(s"Expected line and num match, got: $line, $num from $s"))
                         else {
-                          Try(num.toInt).fold(Stream.fail, sz => {
-                            Stream.emit(IMAPText(line)) ++
-                            collectChunk(sz, Stream.chunk(ByteVectorChunk(bt.drop(2))) ++ tail)
-                          })
+                          Try(num.toInt) match {
+                            case Success(sz) =>
+                              Stream.emit(IMAPText(line)) ++
+                                collectChunk(sz, Stream.chunk(ByteVectorChunk(bt.drop(2))) ++ tail)
+
+                            case Failure(err) =>
+                              Stream.fail(err)
+                          }
                         }
                       case None => Stream.fail(new Throwable(s"Expected {sz} macro at end of line got : $s"))
                     }

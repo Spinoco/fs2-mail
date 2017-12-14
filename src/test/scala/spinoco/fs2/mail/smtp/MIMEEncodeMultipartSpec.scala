@@ -59,7 +59,7 @@ object MIMEEncodeMultipartSpec extends Properties("MIMEEncodeMultipart") {
       , mimeHeaderCodec = mimeCodec
     )
     .chunks.map(ByteVectorChunk.asByteVector)
-    .runLog.map { _.reduce(_ ++ _).decodeUtf8.getOrElse("--ERR--") }
+    .runLog.map { _.reduce(_ ++ _).decodeUtf8.right.getOrElse("--ERR--") }
     .unsafeRun() ?=
     """Subject: Test Email
       |Date: Tue, 12 Dec 2017 07:32:10 +0000
@@ -129,7 +129,7 @@ object MIMEEncodeMultipartSpec extends Properties("MIMEEncodeMultipart") {
         , mimeHeaderCodec = mimeCodec
       )
       .chunks.map(ByteVectorChunk.asByteVector)
-      .runLog.map { _.reduce(_ ++ _).decodeUtf8.getOrElse("--ERR--") }
+      .runLog.map { _.reduce(_ ++ _).decodeUtf8.right.getOrElse("--ERR--") }
       .unsafeRun() ?=
       """Subject: Test Email
         |Date: Tue, 12 Dec 2017 07:32:10 +0000

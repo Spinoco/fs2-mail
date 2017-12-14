@@ -23,7 +23,7 @@ import spinoco.protocol.mail.mime.{MIMEHeader, TransferEncoding}
 import spinoco.protocol.mime.{ContentType, MIMECharset, MediaType}
 
 import scala.concurrent.duration.FiniteDuration
-import scala.util.Try
+import scala.util.{Failure, Success, Try}
 
 /**
   * SMTP Client implemented according to RFC 5321
@@ -201,13 +201,16 @@ object SMTPClient {
       _.pull(go(ByteVector.empty)).flatMap { line =>
         if (line.length < 4) Stream.fail(new Throwable(s"Failed to process server response, server response must have size of at least 4 characters. got $line"))
         else {
-          Try(Code(line.take(3).toInt)).fold(
-            err => Stream.fail(new Throwable(s""))
-            , { code =>
+          Try(Code(line.take(3).toInt)) match {
+            case Success(code) =>
               val out = Stream.emit(Some(SMTPResponse(code, line.drop(4))))
               if (line(3) == '-') out
               else out ++ Stream.emit(None)
-          })
+
+            case Failure(err) =>
+              Stream.fail(err)
+
+          }
 
         }
       }.unNoneTerminate
