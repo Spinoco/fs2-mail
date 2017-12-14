@@ -20,6 +20,5 @@ env:
     - COURSIER_PROGRESS=0
 
 script:
-  - sbt ++$TRAVIS_SCALA_VERSION -Dfile.encoding=UTF8 test mimaReportBinaryIssues
-  - (test $TRAVIS_SCALA_VERSION == "2.11.11" && sbt ++$TRAVIS_SCALA_VERSION -Dfile.encoding=UTF8 -J-Xms2g -J-Xmx2g) || test $TRAVIS_SCALA_VERSION == "2.12.4"
+  - sbt ++$TRAVIS_SCALA_VERSION -Dfile.encoding=UTF8 test
 
