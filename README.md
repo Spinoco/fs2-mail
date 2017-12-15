@@ -2,7 +2,7 @@
 
 Asynchronous, non-blocking IMAP/SMTP client for receiving and sending e-mails for scala.
 
-[![Build Status](https://travis-ci.org/Spinoco/fs2-mail.svg?branch=master)](https://travis-ci.org/Spinoco/fs2-mail)
+[![Build Status](https://travis-ci.org/Spinoco/fs2-mail.svg?branch=series/0.1)](https://travis-ci.org/Spinoco/fs2-mail)
 [![Gitter Chat](https://badges.gitter.im/functional-streams-for-scala/fs2.svg)](https://gitter.im/fs2-mail/Lobby)
 
 ## Overview
