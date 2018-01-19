@@ -167,7 +167,7 @@ object MIMEPart {
     , alternative: SinglePart[F]
     , boundary: => String = s"---${ UUID.randomUUID() }---${ UUID.randomUUID() }---"
   ): MultiPart[F] =
-    multipart(subtype = "alternate", parts = Stream(fallback, alternative), boundary = boundary)
+    multipart(subtype = "alternative", parts = Stream(fallback, alternative), boundary = boundary)
 
   /**
     * Creates a MIME part with mixed message content.
