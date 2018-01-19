@@ -44,7 +44,7 @@ for fs2 0.10.x series:
 for fs2 0.9.x series:
 
 ```
-libraryDependencies += "com.spinoco" %% "fs2-mail" % "0.1.0"
+libraryDependencies += "com.spinoco" %% "fs2-mail" % "0.1.1"
 ```
 
 
@@ -52,7 +52,7 @@ libraryDependencies += "com.spinoco" %% "fs2-mail" % "0.1.0"
 
 version  |    scala  |   fs2  |  scodec | shapeless      
 ---------|-----------|--------|---------|----------- 
-0.1.0    | 2.11, 2.12| 0.9.7  | 1.10.3  | 2.3.2
+0.1.1    | 2.11, 2.12| 0.9.7  | 1.10.3  | 2.3.2
 
 
 ## Usage
@@ -98,7 +98,7 @@ smtp.client(tlsSocket).evalMap { smtpClient =>
 
     smtpClient.connect("gmail.com") >>
     smtpClient.login("userName", "password") >>
-    smtpClient.sendText(tag[EmailAddress]("alice@mail.com"), tag[EmailAddress]("bob@mail.com"), header, body)
+    smtpClient.sendText(tag[EmailAddress]("alice@mail.com"), Seq(tag[EmailAddress]("bob@mail.com")), header, body)
     
 
     
@@ -118,7 +118,7 @@ import java.nio.file.Paths
 val fileGifSource: Stream[F, Byte] = ??? // i.e. load from the 
 val body = MIMEPart.file("part-id", "file.gif", MediaType.`image/gif`, fs2.io.file.readAll(Paths.get("/some/file/location/file.gif")))  
 
-smtpClient.send(tag[EmailAddress]("alice@mail.com"), tag[EmailAddress]("bob@mail.com"), header, body)
+smtpClient.send(tag[EmailAddress]("alice@mail.com"), Seq(tag[EmailAddress]("bob@mail.com")), header, body)
 
 ```
 
