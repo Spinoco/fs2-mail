@@ -50,7 +50,7 @@ object MIMEEncodeMultipartSpec extends Properties("MIMEEncodeMultipart") {
         , from = EmailAddress("john.doe", "mail.com", Some("John Doe"))
         , to = EmailAddress("phil.doe", "mail.com", Some("Phil Doe"))
       )
-      , body = MIMEPart.alternate(
+      , body = MIMEPart.alternative(
         MIMEPart.html[Task](htmlText)
         , MIMEPart.plain[Task](plaintext)
         , boundary = "----boundary---"
@@ -65,7 +65,7 @@ object MIMEEncodeMultipartSpec extends Properties("MIMEEncodeMultipart") {
       |Date: Tue, 12 Dec 2017 07:32:10 +0000
       |From: John Doe <john.doe@mail.com>
       |To: Phil Doe <phil.doe@mail.com>
-      |Content-Type: multipart/alternate; boundary=----boundary---
+      |Content-Type: multipart/alternative; boundary=----boundary---
       |Content-Transfer-Encoding: 8bit
       |
       |------boundary---
@@ -110,7 +110,7 @@ object MIMEEncodeMultipartSpec extends Properties("MIMEEncodeMultipart") {
         , body = MIMEPart.multipart(
           subtype = "mixed"
           , parts = Stream.emit(
-            MIMEPart.alternate(
+            MIMEPart.alternative(
               MIMEPart.html[Task](htmlText)
               , MIMEPart.plain[Task](plaintext)
               , boundary = "----alt-boundary---"
@@ -139,7 +139,7 @@ object MIMEEncodeMultipartSpec extends Properties("MIMEEncodeMultipart") {
         |Content-Transfer-Encoding: 8bit
         |
         |-----mixed-boundary---
-        |Content-Type: multipart/alternate; boundary=----alt-boundary---
+        |Content-Type: multipart/alternative; boundary=----alt-boundary---
         |Content-Transfer-Encoding: 8bit
         |
         |------alt-boundary---

@@ -162,7 +162,23 @@ object MIMEPart {
     * @param boundary       A boundary string denoting one part. This string cannot be longer than 70 characters and must not
     *                       contain any whitespaces.
     */
+  @deprecated("Deprecated in favour of [[MIMEPart.alternative]]", "0.1.1")
   def alternate[F[_]](
+    fallback: SinglePart[F]
+    , alternative: SinglePart[F]
+    , boundary: => String = s"---${ UUID.randomUUID() }---${ UUID.randomUUID() }---"
+  ): MultiPart[F] =
+    MIMEPart.alternative(fallback, alternative, boundary)
+
+  /**
+    * Creates a MIME part with alternative message content.
+    *
+    * @param fallback       A content that is used as fallback (i.e. text/plain) if none of the alternatives work.
+    * @param alternative    An alternative content to send (i.e. text/html)
+    * @param boundary       A boundary string denoting one part. This string cannot be longer than 70 characters and must not
+    *                       contain any whitespaces.
+    */
+  def alternative[F[_]](
     fallback: SinglePart[F]
     , alternative: SinglePart[F]
     , boundary: => String = s"---${ UUID.randomUUID() }---${ UUID.randomUUID() }---"

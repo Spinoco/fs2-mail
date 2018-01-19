@@ -438,12 +438,9 @@ object SMTPClient {
     }
 
     /**
+      * Sends to SMTP server the intention of sending some data to given recipients.
       *
-      * @param recipients
-      * @param send
-      * @param F
-      * @tparam F
-      * @return
+      * @param recipients The addresses that should recieve the email.
       */
     def sendToAddresses[F[_]](
       recipients: Seq[String @@ EmailAddress]
