@@ -53,29 +53,29 @@ trait SMTPClient[F[_]] {
     * Sends simple text message where `text` forms a body of the message.
     * Encodes as QuotedPrintable, UTF-8 encoding
     * @param from       source address presented to server.
-    * @param recipient  Recipient for this email
+    * @param recipients Recipients for this email.
     * @param header     Header present to server
     * @param text       text to send as body
     * @return nonempty if sent was ok, Some(result) otherwise
     */
   def sendText(
     from: String @@ EmailAddress
-    , recipient: String @@ EmailAddress
+    , recipients: Seq[String @@ EmailAddress]
     , header: EmailHeader
     , text: Stream[F, Char]
   ) : F[Option[SMTPError]]
 
   /**
     * Send the mail where body is supplied as MIME Part (eventually multiple)
-    * @param from     source address presented to server
-    * @param recipient  Recipient for this email
-    * @param header   Header of email message
-    * @param body     Body of the email (MIME).
+    * @param from         Source address presented to server
+    * @param recipients   Recipients for this email.
+    * @param header       Header of email message
+    * @param body         Body of the email (MIME).
     * @return  nonempty if sent was ok, Some(result) otherwise
     */
   def send(
     from: String @@ EmailAddress
-    , recipient: String @@ EmailAddress
+    , recipients: Seq[String @@ EmailAddress]
     , header: EmailHeader
     , body: MIMEPart[F]
   ) : F[Option[SMTPError]]
@@ -131,13 +131,13 @@ object SMTPClient {
         def loginCramMD5(userName: String, password: String) =
           impl.loginCramMD5(userName, password)
 
-        def sendText(from: @@[String, EmailAddress], recipient: String @@ EmailAddress, header: EmailHeader, text: Stream[F, Char]): F[Option[SMTPError]] =
-          impl.sendMail(from, recipient, impl.encodeTextBody(header, text, emailHeaderCodec, mimeHeaderCodec))
+        def sendText(from: @@[String, EmailAddress], recipients: Seq[String @@ EmailAddress], header: EmailHeader, text: Stream[F, Char]): F[Option[SMTPError]] =
+          impl.sendMail(from, recipients, impl.encodeTextBody(header, text, emailHeaderCodec, mimeHeaderCodec))
 
         def quit: F[Unit] = sendRequest(impl.quit) as (())
 
-        def send(from: @@[String, EmailAddress], recipient: String @@ EmailAddress, header: EmailHeader, body: MIMEPart[F]): F[Option[SMTPError]] =
-          impl.sendMail(from, recipient, impl.encodeMimeBody(header, body, emailHeaderCodec, mimeHeaderCodec))
+        def send(from: @@[String, EmailAddress], recipients: Seq[String @@ EmailAddress], header: EmailHeader, body: MIMEPart[F]): F[Option[SMTPError]] =
+          impl.sendMail(from, recipients, impl.encodeMimeBody(header, body, emailHeaderCodec, mimeHeaderCodec))
       }}
 
     }}
@@ -350,7 +350,7 @@ object SMTPClient {
       command(s"MAIL FROM:${wrapMail(email)}")
 
 
-    /** wraps to email **/
+    /** Specifies which emails will actually recieve the email. **/
     def rcptTo[F[_]](email: String @@ EmailAddress): Stream[F, Byte] =
       command(s"RCPT TO:${wrapMail(email)}")
 
@@ -406,35 +406,57 @@ object SMTPClient {
     /**
       * Sends mail from given address, header and body.
       * @param from         Source address
-      * @param recipient    Recipient of the email
+      * @param recipients   Recipients of the email
       * @param content      Content of the email, including the header
       * @tparam F
       * @return
       */
     def sendMail[F[_]](
       from: String @@ EmailAddress
-      , recipient: String @@ EmailAddress
+      , recipients: Seq[String @@ EmailAddress]
       , content: Stream[F, Byte]
     )(implicit
       send: Stream[F, Byte] => F[Seq[SMTPResponse]]
       , F: Effect[F]
     ) : F[Option[SMTPError]] = {
-      send(mailFrom(from)) flatMap { fromResult =>
+      send(mailFrom(from)).flatMap { fromResult =>
         if (! fromResult.exists(_.code == Code.Completed)) txFail(fromResult)
-        else send(rcptTo(recipient)) flatMap { rcptResult =>
-          if (! rcptResult.exists(_.code == Code.Completed)) txFail(rcptResult)
-          else send(command("DATA")) flatMap { dataResult =>
-            if(! dataResult.exists(_.code == Code.StartMail)) txFail(dataResult)
-            else {
-              send(content.through(insertDotIfNeeded) ++ Stream.chunk(EndOfContent)) flatMap { result =>
-                if (! result.exists(_.code == Code.Completed)) txFail(result)
-                else F.pure(None)
+        else sendToAddresses(recipients).flatMap {
+          case err @ Some(_) => F.pure(err)
+          case None =>
+            send(command("DATA")).flatMap { dataResult =>
+              if(! dataResult.exists(_.code == Code.StartMail)) txFail(dataResult)
+              else {
+                send(content.through(insertDotIfNeeded) ++ Stream.chunk(EndOfContent)) flatMap { result =>
+                  if (! result.exists(_.code == Code.Completed)) txFail(result)
+                  else F.pure(None)
+                }
               }
-            }
-
           }
         }
       }
+    }
+
+    /**
+      * Sends to SMTP server the intention of sending some data to given recipients.
+      *
+      * @param recipients The addresses that should recieve the email.
+      */
+    def sendToAddresses[F[_]](
+      recipients: Seq[String @@ EmailAddress]
+    )(implicit
+      send: Stream[F, Byte] => F[Seq[SMTPResponse]]
+      , F: Effect[F]
+    ): F[Option[SMTPError]] = {
+      recipients.headOption match {
+        case None => F.pure(None)
+        case Some(address) =>
+          send(rcptTo(address)).flatMap{ rcptResult =>
+            if (! rcptResult.exists(_.code == Code.Completed)) txFail(rcptResult)
+            else sendToAddresses(recipients.tail)
+          }
+      }
+
     }
 
     private val crlfChunk = Stream.chunk(ByteVectorChunk(crlf))
