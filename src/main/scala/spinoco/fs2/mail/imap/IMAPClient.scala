@@ -100,7 +100,7 @@ trait IMAPClient[F[_]] {
     * @param range of email to return
     * @return
     */
-  def emailHeaders(range: NumericRange[Long]): Stream[F, IMAPEmailHeader]
+  def emailHeaders(range: NumericRange[Long]): F[Vector[IMAPEmailHeader]]
 
 
   /**
@@ -192,9 +192,11 @@ object IMAPClient {
           def search(term: IMAPSearchTerm, charset: Option[String] = None): F[IMAPResult[Seq[Long @@ MailUID]]] =
             shortContent(request(Search(charset, term)))(parseSearchResult[F])
 
-          def emailHeaders(range: NumericRange[Long]): Stream[F, IMAPEmailHeader] =
-            rawContent(request(Fetch(range, Seq(IMAPFetchContent.UID, IMAPFetchContent.Body(BodySection.HEADER))))) through
-            fetchLog through mkEmailHeader(emailHeaderCodec)
+          def emailHeaders(range: NumericRange[Long]): F[Vector[IMAPEmailHeader]] =
+            rawContent(request(Fetch(range, Seq(IMAPFetchContent.UID, IMAPFetchContent.Body(BodySection.HEADER)))))
+            .through(fetchLog)
+            .through(mkEmailHeader(emailHeaderCodec))
+            .runFold(Vector.empty[IMAPEmailHeader])(_ :+ _)
 
           def bodyStructureOf(uid: @@[Long, MailUID]): F[IMAPResult[Seq[EmailBodyPart]]] =
             shortContent(request(Fetch(NumericRange(uid:Long, uid:Long, 1), Seq(IMAPFetchContent.BODYSTRUCTURE))))(parseBodyStructure[F])
