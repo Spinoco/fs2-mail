@@ -376,9 +376,9 @@ object IMAPClient {
                 tail.takeThrough {
                   case IMAPText(l) => ! l.startsWith(tag)
                   case _  => true
-                }.dropLastIf {
-                  case IMAPText(l) => l.startsWith(tag)
-                  case _ => false
+                }.filter {
+                  case IMAPText(l) => !l.startsWith(tag)
+                  case _ => true
                 } onFinalize { requestSemaphore.increment }
               ))
             }
