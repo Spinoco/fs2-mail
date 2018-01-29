@@ -6,7 +6,7 @@ import java.nio.charset.{Charset, StandardCharsets}
 import fs2._
 import fs2.async.mutable.Semaphore
 import fs2.io.tcp.Socket
-import fs2.util.{Async, Catchable, Effect, Monad}
+import fs2.util._
 import fs2.util.syntax._
 import scodec.{Attempt, Codec}
 import scodec.bits.{BitVector, ByteVector}
@@ -109,7 +109,10 @@ trait IMAPClient[F[_]] {
   def bodyStructureOf(uid: Long @@ MailUID): F[IMAPResult[Seq[EmailBodyPart]]]
 
   /**
-    * Allows to fetch bytes of given mime binary part
+    * Allows to fetch bytes of given mime binary part.
+    *
+    * All other commands will fail while this command is being processed. As to prevent deadlock.
+    *
     * @param uid    Id of message
     * @param part   Binary part specification. The data in binary part specification will be used
     *               to parse conent to stream of bytes.
@@ -118,13 +121,28 @@ trait IMAPClient[F[_]] {
   def bytesOf(uid: Long @@ MailUID, part: EmailBodyPart.BinaryPart): Stream[F, Byte]
 
   /**
-    * Allows to fetch textual representation of given mime part
+    * Allows to fetch textual representation of given mime part.
+    *
+    * All other commands will fail while this command is being processed. As to prevent deadlock.
+    *
     * @param uid    Id of message
     * @param part   Textual part specification. The data in specification will be used to decode
     *               text to resulting stream of strings.
     * @return
     */
   def textOf(uid: Long @@ MailUID, part: EmailBodyPart.TextPart): Stream[F, Char]
+
+  /**
+    * Causes to perform Idle command against the server as per RFC 2177.
+    *
+    * All other commands will fail while this command is being processed. As to prevent deadlock.
+    *
+    * The idle command should be restarted atleast every 29 minutes to prevent the remote server
+    * logging out the user due to inactivity. In reality the idle should be restarted more often
+    * as real servers have much shorter inactivity timeouts.
+    *
+    */
+  def idle: Stream[F, IMAPIdleContext[F]]
 
 }
 
@@ -153,6 +171,7 @@ object IMAPClient {
     Stream.eval(Async.refOf[F, Long](0l)) flatMap { idxRef =>
     Stream.eval(async.semaphore(0)) flatMap { requestSemaphore =>
     Stream.eval(async.boundedQueue[F, IMAPData](bufferLines)) flatMap { incomingQ =>
+    Stream.eval(F.refOf(false)) flatMap { inProcessing =>
 
       val received =
         (
@@ -169,50 +188,84 @@ object IMAPClient {
 
       val request = requestCmd(idxRef, requestSemaphore, incomingQ.dequeue, send) _
 
+      /**
+        * Guards a request to the server by checking whether there is currently connection blocking command running.
+        * If such command is running it is impossible to interrupt it.
+        * As such this request would wait on the command to finish. If this command was called as result of some partial
+        * data from the "blocking" command then we would get into dead lock.
+        * Thus we rather fail.
+        *
+        * Do note that the connection blocking commands are only that return stream.
+        */
+      def guardedRequest(cmd: IMAPCommand): RequestResult[F] = {
+        Stream.eval(inProcessing.get).flatMap{
+          case false => request(cmd)
+          case true => Stream.fail(new Throwable("Cannot perform action on IMAP client since we are in midst of another IMAP streaming"))
+        }
+      }
+
       val client =
         new IMAPClient[F] {
           def login(userName: String, password: String) =
-            shortContent(request(LoginPlainText(userName, password)))(parseLogin[F])
+            shortContent(guardedRequest(LoginPlainText(userName, password)))(parseLogin[F])
 
           def logout =
-            shortContent(request(Logout)) { _ => F.pure(()) } as (())
+            shortContent(guardedRequest(Logout)) { _ => F.pure(()) } as (())
 
           def capability =
-            shortContent(request(Capability))(parseCapability[F])
+            shortContent(guardedRequest(Capability))(parseCapability[F])
 
           def select(mailbox: @@[String, MailboxName]) =
-            shortContent(request(Select(mailbox)))(parseSelect[F])
+            shortContent(guardedRequest(Select(mailbox)))(parseSelect[F])
 
           def examine(mailbox: @@[String, MailboxName]) =
-            shortContent(request(Examine(mailbox)))(parseSelect[F])
+            shortContent(guardedRequest(Examine(mailbox)))(parseSelect[F])
 
           def list(reference: String, wildcardName: String): F[IMAPResult[Seq[IMAPMailbox]]] =
-            shortContent(request(ListMailbox(reference, wildcardName)))(parseMailboxList[F])
+            shortContent(guardedRequest(ListMailbox(reference, wildcardName)))(parseMailboxList[F])
 
           def search(term: IMAPSearchTerm, charset: Option[String] = None): F[IMAPResult[Seq[Long @@ MailUID]]] =
-            shortContent(request(Search(charset, term)))(parseSearchResult[F])
+            shortContent(guardedRequest(Search(charset, term)))(parseSearchResult[F])
 
           def emailHeaders(range: NumericRange[Long]): F[Vector[IMAPEmailHeader]] =
-            rawContent(request(Fetch(range, Seq(IMAPFetchContent.UID, IMAPFetchContent.Body(BodySection.HEADER)))))
+            rawContent(guardedRequest(Fetch(range, Seq(IMAPFetchContent.UID, IMAPFetchContent.Body(BodySection.HEADER)))))
             .through(fetchLog)
             .through(mkEmailHeader(emailHeaderCodec))
             .runFold(Vector.empty[IMAPEmailHeader])(_ :+ _)
 
           def bodyStructureOf(uid: @@[Long, MailUID]): F[IMAPResult[Seq[EmailBodyPart]]] =
-            shortContent(request(Fetch(NumericRange(uid:Long, uid:Long, 1), Seq(IMAPFetchContent.BODYSTRUCTURE))))(parseBodyStructure[F])
+            shortContent(guardedRequest(Fetch(NumericRange(uid:Long, uid:Long, 1), Seq(IMAPFetchContent.BODYSTRUCTURE))))(parseBodyStructure[F])
 
           def bytesOf(uid: @@[Long, MailUID], part: EmailBodyPart.BinaryPart): Stream[F, Byte] = {
             val content = IMAPFetchContent.Body(BodySection(part.partId))
-            rawContent(request(Fetch(NumericRange(uid: Long, uid: Long, 1), Seq(content)))) through
-            fetchBytesOf(0, content.content, part.tpe.fields.encoding)
+            impl.guardStream(
+              inProcessing
+              , rawContent(request(Fetch(NumericRange(uid: Long, uid: Long, 1), Seq(content)))) through
+                fetchBytesOf(0, content.content, part.tpe.fields.encoding)
+            )
           }
 
           def textOf(uid: @@[Long, MailUID], part: EmailBodyPart.TextPart): Stream[F, Char] = {
             val content = IMAPFetchContent.Body(BodySection(part.partId))
-            rawContent(request(Fetch(NumericRange(uid: Long, uid: Long, 1), Seq(content)))) through
-            fetchTextOf(0, content.content, part.tpe.fields.encoding, part.charsetName)
+            impl.guardStream(
+              inProcessing
+              , rawContent(request(Fetch(NumericRange(uid: Long, uid: Long, 1), Seq(content)))) through
+                fetchTextOf(0, content.content, part.tpe.fields.encoding, part.charsetName)
+            )
           }
-}
+
+          def idle: Stream[F, IMAPIdleContext[F]] = {
+            impl.guardStream(
+              inProcessing
+              , request(Idle).flatMap{
+                case Left(err) => Stream.fail(new Throwable(s"Failed to perform the command: $err"))
+                case Right(data) => Stream.eval(IMAPIdleContext.mk(data, send))
+              }
+            )
+          }
+
+
+        }
 
       concurrent.join(Int.MaxValue)(Stream(
         Stream.emit(client)
@@ -221,12 +274,36 @@ object IMAPClient {
       ))
       .interruptWhen(terminated)
       .onFinalize(terminated.set(true))
-    }}}}
+    }}}}}
   }
 
 
 
   object impl {
+
+    /**
+      * Guards a stream stream against a given ref. Which signals whether there is currently blocking connection
+      * thus our stream cannot be run.
+      *
+      * If the stream is allowed to be run, it itself sets the blocking to prevent other stream to be run while this stream
+      * is executing.
+      *
+      * @param runningGuard The guard that tells us whether there is an existing blocking connection.
+      * @param stream       The stream to be run if there is currently no blocking connection
+      */
+    def guardStream[F[_], A](
+      runningGuard: Async.Ref[F, Boolean]
+      , stream: Stream[F, A]
+    )(implicit F: Applicative[F]): Stream[F, A] = {
+      Stream.bracket(runningGuard.modify(_ => true))(
+        change => {
+          if (change.previous) Stream.fail(new Throwable("Cannot perform action on IMAP client since we are in midst of another IMAP streaming"))
+          else stream
+        }
+        , change => if (change.previous) F.pure(()) else runningGuard.setPure(false)
+      )
+    }
+
 
     type RequestResult[F[_]] = Stream[F, Either[String, Stream[F, IMAPData]]]
 
