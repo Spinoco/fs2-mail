@@ -40,7 +40,7 @@ object IMAPCommand {
   }
 
 
-  final case class Fetch(range: NumericRange[Long], content: Seq[IMAPFetchContent]) extends IMAPCommand {
+  final case class Fetch(range: NumericRange[Long], content: Seq[IMAPFetchContent]) extends UIDScoped {
     def asIMAPv4: String = {
       val contentString = s"(${content.map(_.content).mkString(" ")})"
       if (range.start == range.end) s"FETCH ${range.start} $contentString"
@@ -48,9 +48,15 @@ object IMAPCommand {
     }
   }
 
+
+  final case class UID(command : UIDScoped) extends IMAPCommand {
+    def asIMAPv4: String = s"UID ${command.asIMAPv4}"
+  }
+
 }
 
 
+sealed trait UIDScoped extends IMAPCommand
 
 sealed trait IMAPCommand {
   def asIMAPv4: String

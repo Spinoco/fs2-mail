@@ -193,17 +193,17 @@ object IMAPClient {
             shortContent(request(Search(charset, term)))(parseSearchResult[F])
 
           def emailHeaders(range: NumericRange[Long]): F[Vector[IMAPEmailHeader]] =
-            rawContent(request(Fetch(range, Seq(IMAPFetchContent.UID, IMAPFetchContent.Body(BodySection.HEADER)))))
+            rawContent(request(UID(Fetch(range, Seq(IMAPFetchContent.UID, IMAPFetchContent.Body(BodySection.HEADER))))))
             .through(fetchLog)
             .through(mkEmailHeader(emailHeaderCodec))
             .runFold(Vector.empty[IMAPEmailHeader])(_ :+ _)
 
           def bodyStructureOf(uid: @@[Long, MailUID]): F[IMAPResult[Seq[EmailBodyPart]]] =
-            shortContent(request(Fetch(NumericRange(uid:Long, uid:Long, 1), Seq(IMAPFetchContent.BODYSTRUCTURE))))(parseBodyStructure[F])
+            shortContent(request(UID(Fetch(NumericRange(uid:Long, uid:Long, 1), Seq(IMAPFetchContent.BODYSTRUCTURE)))))(parseBodyStructure[F])
 
           def bytesOf(uid: @@[Long, MailUID], part: EmailBodyPart.BinaryPart): Stream[F, Byte] = {
             val content = IMAPFetchContent.Body(BodySection(part.partId))
-            rawContent(request(Fetch(NumericRange(uid: Long, uid: Long, 1), Seq(content)))) through
+            rawContent(request(UID(Fetch(NumericRange(uid: Long, uid: Long, 1), Seq(content))))) through
             fetchBytesOf(0, content.content, part.tpe.fields.encoding)
           }
 
@@ -212,7 +212,7 @@ object IMAPClient {
             rawContent(request(Fetch(NumericRange(uid: Long, uid: Long, 1), Seq(content)))) through
             fetchTextOf(0, content.content, part.tpe.fields.encoding, part.charsetName)
           }
-}
+      }
 
       concurrent.join(Int.MaxValue)(Stream(
         Stream.emit(client)
@@ -283,6 +283,8 @@ object IMAPClient {
       Stream.eval_(requestSemaphore.decrement) ++
       Stream.eval(idxRef.modify { _ + 1 } map { c => java.lang.Long.toHexString(c.now) }) flatMap { tag =>
         val commandLine = s"$tag ${cmd.asIMAPv4}\r\n"
+
+        println("XXXA coomand line: " + commandLine)
 
         def unlock = Stream.eval(requestSemaphore.increment)
 
@@ -376,10 +378,10 @@ object IMAPClient {
     /** parses reult of FETCH xyz (BODYSTRUCTURE) request **/
     def parseBodyStructure[F[_]](lines: Seq[String])(implicit F: Effect[F]): F[Seq[EmailBodyPart]] = {
       val line = lines.mkString
-      val indexStart = line.indexOf("(")
+      val indexStart = line.indexOf("BODYSTRUCTURE")
       if (indexStart < 0) F.fail(new Throwable("Could not find start of body structure."))
       else {
-        IMAPBodyPartCodec.bodyStructure.decode(BitVector.view(line.drop(indexStart).getBytes)) match {
+        IMAPBodyPartCodec.bodyStructure.decode(BitVector.view(("(" + line.drop(indexStart)).getBytes)) match {
           case Attempt.Successful(result) => F.pure(EmailBodyPart.flatten(result.value))
           case Attempt.Failure(err) => F.fail(new Throwable(s"failed to decode BODYSTRUCTURE: $err ($lines)"))
         }
