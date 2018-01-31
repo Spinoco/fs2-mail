@@ -47,7 +47,7 @@ object IMAPIdleContext {
   ): F[IMAPIdleContext[F]] = {
     F.map(F.refOf(false)) { startedRead =>
       new IMAPIdleContext[F] {
-        def done: F[Unit] = writeToServer("DONE")
+        def done: F[Unit] = writeToServer("DONE\r\n")
 
         def events: Stream[F, IMAPIdleMessage] = {
           Stream.eval(startedRead.modify(_ => true)).flatMap { change =>
