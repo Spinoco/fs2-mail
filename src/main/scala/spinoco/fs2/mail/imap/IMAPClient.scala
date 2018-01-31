@@ -284,8 +284,6 @@ object IMAPClient {
       Stream.eval(idxRef.modify { _ + 1 } map { c => java.lang.Long.toHexString(c.now) }) flatMap { tag =>
         val commandLine = s"$tag ${cmd.asIMAPv4}\r\n"
 
-        println("XXXA coomand line: " + commandLine)
-
         def unlock = Stream.eval(requestSemaphore.increment)
 
         Stream.eval_(toServer(commandLine)) ++
