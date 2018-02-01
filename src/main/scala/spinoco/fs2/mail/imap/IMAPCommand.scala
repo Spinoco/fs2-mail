@@ -39,13 +39,16 @@ object IMAPCommand {
     }
   }
 
-
   final case class Fetch(range: NumericRange[Long], content: Seq[IMAPFetchContent]) extends IMAPCommand {
     def asIMAPv4: String = {
       val contentString = s"(${content.map(_.content).mkString(" ")})"
       if (range.start == range.end) s"FETCH ${range.start} $contentString"
       else s"FETCH ${range.start}:${range.end} $contentString"
     }
+  }
+
+  final case object Idle extends IMAPCommand {
+    def asIMAPv4: String = "IDLE"
   }
 
 }
