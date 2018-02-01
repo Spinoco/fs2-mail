@@ -209,7 +209,7 @@ object IMAPClient {
 
           def textOf(uid: @@[Long, MailUID], part: EmailBodyPart.TextPart): Stream[F, Char] = {
             val content = IMAPFetchContent.Body(BodySection(part.partId))
-            rawContent(request(Fetch(NumericRange(uid: Long, uid: Long, 1), Seq(content)))) through
+            rawContent(request(UID(Fetch(NumericRange(uid: Long, uid: Long, 1), Seq(content))))) through
             fetchTextOf(0, content.content, part.tpe.fields.encoding, part.charsetName)
           }
       }
