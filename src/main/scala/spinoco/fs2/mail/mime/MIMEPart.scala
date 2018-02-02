@@ -127,7 +127,7 @@ object MIMEPart {
     SinglePart(
       header =
         MIMEHeader(List.empty)
-        .contentType(ContentType.BinaryContent(tpe))
+        .contentType(ContentType.BinaryContent(tpe, None))
         .transferEncoding(TransferEncoding.Base64)
         .contentId(id)
       , data = stream through encoding.base64.encode through lines.blockLines()
