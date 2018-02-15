@@ -447,7 +447,7 @@ object IMAPClient {
         encoding.toUpperCase match {
           case "BASE64" => base64.decode[F](s) through charset.decode(chs)
           case "QUOTED-PRINTABLE" => quotedPrintable.decode[F](s) through charset.decode(chs)
-          case "7BIT" | "8BIT" => s through charset.decode(chs)
+          case "7BIT" | "8BIT" | "BINARY" => s through charset.decode(chs)
           case other => s.flatMap { _ => Stream.fail(new Throwable(s"Unsupported encoding: $other")) }
         }
       }
