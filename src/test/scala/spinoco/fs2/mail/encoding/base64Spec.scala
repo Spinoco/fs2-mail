@@ -66,7 +66,7 @@ object base64Spec extends Properties("base64") {
     var performed: Boolean = false
     val encoded = "SGVsbG8gV29ybGQ=".getBytes
     ((Stream.chunk[Task,Byte](Chunk.bytes(encoded)) ++
-      Stream.eval_(Task.delay(performed = true))
+      Stream.eval_(Task.delay{ performed = true })
     )
     .through(base64.decodeDrained)
     .chunks
