@@ -422,7 +422,7 @@ object IMAPClientFetchSpec extends Properties("IMAPClient.Fetch"){
   }
 
 
-  property("decode-fetch-bytes.base64") = forAll(Gen.choose(1, fetchBodyByteResponse.size))  { sz =>
+  property("decode-fetch-bytes.base64.bytes") = forAll(Gen.choose(1, fetchBodyByteResponse.size))  { sz =>
     decodeFetchBytes(fetchBodyByteResponse, sz) ?= fetchBodyBytes
   }
 
@@ -523,7 +523,7 @@ object IMAPClientFetchSpec extends Properties("IMAPClient.Fetch"){
       |PGh0dHA6Ly9hcHAuZ28uY2xvdWRlcmEuY29tL2Uvc2w/cz0xNDY1MDU0MzYxJmVscT0z
       |MDZmZGMwNjliZDQ0OGE2YTI0MTFhZGU2ZGZjMzgzND4gICAgICAgICAgICAgICAgICAg
       |ICAgICAgICAgICAgICAgICAgDQoNCg==)
-      |
+      |13 OK Success
     """.stripMargin.lines.mkString("\r\n")
 
   val SP = " "
@@ -544,7 +544,7 @@ object IMAPClientFetchSpec extends Properties("IMAPClient.Fetch"){
   }
 
 
-  property("decode-fetch-bytes.quoted-printable") = forAll(Gen.choose(1, BodyTextQuotedPrintableResponse.size))  { sz =>
+  property("decode-fetch-bytes.quoted-printable") = forAll(Gen.choose(2, BodyTextQuotedPrintableResponse.size))  { sz =>
 
 
     decodeFetchText(BodyTextQuotedPrintableResponse, sz, encoding = "QUOTED-PRINTABLE", charset = Some("UTF-8")) ?=
@@ -560,7 +560,7 @@ object IMAPClientFetchSpec extends Properties("IMAPClient.Fetch"){
   }
 
 
-  property("decode-fetch-bytes.base64") = forAll(Gen.choose(1, BodyTextBase64Response.size))  { sz =>
+  property("decode-fetch-bytes.base64.text") = forAll(Gen.choose(1, BodyTextBase64Response.size))  { sz =>
 
     val r = decodeFetchText(BodyTextBase64Response, sz, encoding = "BASE64", charset = Some("UTF-8"))
       .lines.map(_.trim).mkString("\r\n")
