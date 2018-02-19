@@ -57,8 +57,10 @@ object base64 {
   /**
     * Decodes base64 encoded stream with supplied alphabet. Whitespaces are ignored.
     * Decoding is lazy to support very large Base64 bodies (i.e. email)
+    *
+    * This supports additional operation over the remaining stream after
     */
-  def decodeRaw[F[_]](alphabet:Base64Alphabet):Pipe[F, Byte, Byte] = {
+  def decodeRaw[F[_]](alphabet:Base64Alphabet, drain: Handle[F, Byte] => Pull[F, Nothing, Unit]):Pipe[F, Byte, Byte] = {
     val Pad = alphabet.pad
     def go(remAcc:BitVector):Handle[F, Byte] => Pull[F, Byte, Unit] = {
       _.receiveOption {
@@ -87,7 +89,8 @@ object base64 {
             if (aligned <= 0 && !term) go(acc)(h)
             else {
               val (out, rem) = acc.splitAt(aligned)
-              if (term) Pull.output(ByteVectorChunk(out.toByteVector))
+
+              if (term) Pull.output(ByteVectorChunk(out.toByteVector)) >> drain(h)
               else Pull.output(ByteVectorChunk(out.toByteVector)) >> go(rem)(h)
             }
 
@@ -102,11 +105,21 @@ object base64 {
 
   /** decodes base64 encoded stream [[http://tools.ietf.org/html/rfc4648#section-5 RF4648 section 5]]. Whitespaces are ignored **/
   def decodeUrl[F[_]]:Pipe[F, Byte, Byte] =
-    decodeRaw(Alphabets.Base64Url)
+    decodeRaw(Alphabets.Base64Url, _ => Pull.done)
 
   /** decodes base64 encoded stream [[http://tools.ietf.org/html/rfc4648#section-4 RF4648 section 4]] **/
   def decode[F[_]]:Pipe[F, Byte, Byte] =
-    decodeRaw(Alphabets.Base64)
+    decodeRaw(Alphabets.Base64, _ => Pull.done)
 
+  /** same as [[decode]], but drains the remaining stream, ignoring any output of it. **/
+  def decodeDrained[F[_]]: Pipe[F, Byte, Byte] = {
+    def go: Handle[F, Byte] => Pull[F, Nothing, Unit] =
+      _.receiveOption{
+        case None => Pull.done
+        case Some((_, h)) => go(h)
+      }
+
+    decodeRaw(Alphabets.Base64, go)
+  }
 
 }
