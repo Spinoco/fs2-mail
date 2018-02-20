@@ -15,6 +15,7 @@ import shapeless.tag.@@
 import spinoco.fs2.mail.imap.IMAPCommand._
 import spinoco.fs2.mail.interop.ByteVectorChunk
 import spinoco.fs2.mail.encoding.{base64, charset, quotedPrintable}
+import spinoco.fs2.mail.internal.TaggedStream
 import spinoco.protocol.mail.EmailHeader
 import spinoco.protocol.mail.header.codec.EmailHeaderCodec
 import spinoco.protocol.mail.imap.codec.IMAPBodyPartCodec
@@ -167,7 +168,9 @@ object IMAPClient {
       def send(line: String): F[Unit] =
         socket.write(Chunk.bytes(line.getBytes), None)
 
-      val request = requestCmd(idxRef, requestSemaphore, incomingQ.dequeue, send) _
+      val tagged = TaggedStream.fromStream(incomingQ.dequeue)
+
+      val request = requestCmd(idxRef, requestSemaphore, tagged, send) _
 
       val client =
         new IMAPClient[F] {
@@ -277,7 +280,7 @@ object IMAPClient {
     def requestCmd[F[_]](
       idxRef: Async.Ref[F, Long]
       , requestSemaphore: Semaphore[F]
-      , fromServer: Stream[F, IMAPData]
+      , fromServer: TaggedStream[F, IMAPData]
       , toServer: String => F[Unit]
     )(cmd: IMAPCommand)(implicit F: Async[F]): RequestResult[F] = {
       Stream.eval_(requestSemaphore.decrement) ++
@@ -287,22 +290,22 @@ object IMAPClient {
         def unlock = Stream.eval(requestSemaphore.increment)
 
         Stream.eval_(toServer(commandLine)) ++
-        fromServer.uncons1 flatMap {
-          case None => unlock map { _ => Left("* BAD Connection with server terminated") }
+        fromServer.takeThrough {
+          case IMAPText(l) => ! l.startsWith(tag)
+          case _  => true
+        }.uncons1.flatMap {
+          case None => unlock.map { _ => Left("* BAD Connection with server terminated") }
           case Some((IMAPText(resp), tail)) =>
             if (resp.startsWith(tag)) {
-              if (resp.drop(tag.size).trim.startsWith("OK")) unlock map { _ =>  Right(Stream.empty) } // no result ok was just received
-              else unlock map { _ => Left(resp.drop(tag.size)) }  // failure
+              if (resp.drop(tag.size).trim.startsWith("OK")) tail.drain ++ unlock.map { _ =>  Right(Stream.empty) } // no result ok was just received
+              else tail.drain ++ unlock.map { _ => Left(resp.drop(tag.size)) }  // failure
             } else {
               Stream(Right(
                 Stream.emit[F, IMAPData](IMAPText(resp)) ++
-                tail.takeThrough {
-                  case IMAPText(l) => ! l.startsWith(tag)
-                  case _  => true
-                }.dropLastIf {
+                tail.dropLastIf {
                   case IMAPText(l) => l.startsWith(tag)
                   case _ => false
-                } onFinalize { requestSemaphore.increment }
+                }.onFinalize { requestSemaphore.increment }
               ))
             }
 
@@ -411,7 +414,7 @@ object IMAPClient {
 
       val decoder: Pipe[F, Byte, Byte] = { s =>
         encoding.toUpperCase match {
-          case "BASE64" => base64.decodeDrained[F](s)
+          case "BASE64" => base64.decode[F](s)
           case "QUOTED-PRINTABLE" => quotedPrintable.decode[F](s)
           case "7BIT" | "8BIT" | "BINARY" => s
           case other => s.flatMap { _ => Stream.fail(new Throwable(s"Unsupported encoding: $other")) }
@@ -445,7 +448,7 @@ object IMAPClient {
 
       val decoder: Pipe[F, Byte, Char] = { s =>
         encoding.toUpperCase match {
-          case "BASE64" => base64.decodeDrained[F](s) through charset.decode(chs)
+          case "BASE64" => base64.decode[F](s) through charset.decode(chs)
           case "QUOTED-PRINTABLE" => quotedPrintable.decode[F](s) through charset.decode(chs)
           case "7BIT" | "8BIT" | "BINARY" => s through charset.decode(chs)
           case other => s.flatMap { _ => Stream.fail(new Throwable(s"Unsupported encoding: $other")) }

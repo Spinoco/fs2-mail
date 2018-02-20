@@ -1,6 +1,6 @@
 package spinoco.fs2.mail.encoding
 
-import fs2.{Chunk, Pull, Stream, Task}
+import fs2.{Chunk, Stream, Task}
 import org.scalacheck.{Arbitrary, Gen, Properties}
 import org.scalacheck.Prop._
 import scodec.bits.Bases.{Alphabets, Base64Alphabet}
@@ -9,8 +9,6 @@ import shapeless.the
 import spinoco.fs2.mail.interop.ByteVectorChunk
 
 object base64Spec extends Properties("base64") {
-
-
   case class EncodingSample(chunkSize:Int, text:String, alphabet: Base64Alphabet)
 
   implicit val encodingTestInstance : Arbitrary[EncodingSample] = Arbitrary {
@@ -32,12 +30,11 @@ object base64Spec extends Properties("base64") {
     )
   }
 
-
   property("decodes.base64") = forAll { sample: EncodingSample =>
     val encoded = ByteVector.view(sample.text.getBytes).toBase64(sample.alphabet)
     Stream.chunk[Task,Byte](Chunk.bytes(encoded.getBytes))
       .chunkLimit(sample.chunkSize).flatMap(Stream.chunk)
-      .through(base64.decodeRaw(sample.alphabet, _ => Pull.done))
+      .through(base64.decodeRaw(sample.alphabet))
       .chunks
       .fold(ByteVector.empty){ case (acc, n) => acc ++ ByteVectorChunk.asByteVector(n)}
       .map(_.decodeUtf8)
@@ -50,30 +47,13 @@ object base64Spec extends Properties("base64") {
     val r =
       Stream.chunk[Task,Byte](Chunk.bytes(sample.text.getBytes)).chunkLimit(sample.chunkSize).flatMap(Stream.chunk)
         .through(base64.encodeRaw(sample.alphabet))
-        .through(base64.decodeRaw(sample.alphabet, _ => Pull.done))
+        .through(base64.decodeRaw(sample.alphabet))
         .chunks
         .fold(ByteVector.empty){ case (acc, n) => acc ++ ByteVectorChunk.asByteVector(n)}
         .runLog.unsafeRun()
-
-
 
     r ?= Vector(ByteVector.view(sample.text.getBytes))
 
   }
 
-
-  property("decodes.base64.drains") = protect{
-    var performed: Boolean = false
-    val encoded = "SGVsbG8gV29ybGQ=".getBytes
-    ((Stream.chunk[Task,Byte](Chunk.bytes(encoded)) ++
-      Stream.eval_(Task.delay{ performed = true })
-    )
-    .through(base64.decodeDrained)
-    .chunks
-    .fold(ByteVector.empty){ case (acc, n) => acc ++ ByteVectorChunk.asByteVector(n)}
-    .map(_.decodeUtf8)
-    .runLog.unsafeRun() ?= Vector(
-      Right("Hello World")
-    )) && performed
-  }
 }
