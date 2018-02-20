@@ -57,8 +57,6 @@ object base64 {
   /**
     * Decodes base64 encoded stream with supplied alphabet. Whitespaces are ignored.
     * Decoding is lazy to support very large Base64 bodies (i.e. email)
-    *
-    * This supports additional operation over the remaining stream after
     */
   def decodeRaw[F[_]](alphabet:Base64Alphabet):Pipe[F, Byte, Byte] = {
     val Pad = alphabet.pad
@@ -89,7 +87,6 @@ object base64 {
             if (aligned <= 0 && !term) go(acc)(h)
             else {
               val (out, rem) = acc.splitAt(aligned)
-
               if (term) Pull.output(ByteVectorChunk(out.toByteVector))
               else Pull.output(ByteVectorChunk(out.toByteVector)) >> go(rem)(h)
             }
