@@ -298,11 +298,11 @@ object IMAPClient {
               else tail.drain ++ unlock.map { _ => Left(resp.drop(tag.size)) }  // failure
             } else {
               Stream(Right(
-                Stream.emit[F, IMAPData](IMAPText(resp)) ++
+                (Stream.emit[F, IMAPData](IMAPText(resp)) ++
                 tail.dropLastIf {
                   case IMAPText(l) => l.startsWith(tag)
                   case _ => false
-                }.onFinalize { requestSemaphore.increment }
+                }).onFinalize { requestSemaphore.increment }
               ))
             }
 
@@ -328,20 +328,19 @@ object IMAPClient {
       * @return
       */
     def shortContent[F[_], A](stream: RequestResult[F])(f: Seq[String] => F[A])(implicit F: Catchable[F]): F[Either[String, A]] = {
-      stream.runLast flatMap {
-        case None => F.pure(Left("Command failed to be processed, no output from server?"))
-        case Some(Right(s)) =>
-          (s through concatLines).runLog map { acc =>
-            acc.map { s =>
-              val line = s.dropWhile { c => c != '*'}
-              if (line.headOption.contains('*')) line.tail
-              else  line
-            }
-          } flatMap f map { a => Right(a) }
-        case Some(Left(err)) => F.pure(Left(err))
-      }
-    }
+      stream.flatMap {
+        case Right(s) =>
+          s.through(concatLines).map{ s =>
+            val line = s.dropWhile { c => c != '*'}
+            if (line.headOption.contains('*')) line.tail
+            else  line
+          }.fold(Vector.empty[String])(_ :+ _)
+          .evalMap(f)
+          .map(Right(_))
 
+        case Left(err) => Stream.emit(Left(err))
+      }.runLast.map(_.getOrElse(Left("Command failed to be processed, no output from server?")))
+    }
 
     /** parses login response, returning any supported capabiliites **/
     def parseLogin[F[_]](lines: Seq[String])(implicit F: Monad[F]): F[Seq[String]] =
