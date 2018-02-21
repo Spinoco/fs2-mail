@@ -3,9 +3,11 @@ package spinoco.fs2.mail.internal
 import org.scalacheck.Properties
 import org.scalacheck.Prop._
 import fs2.{Strategy, Stream, Task}
+import spinoco.fs2.mail.internal
+
 import scala.concurrent.duration._
 
-object TaggedStreamSpec extends Properties("TaggedStream"){
+object TakeThroughDrainSpec extends Properties("TakeThroughDrain"){
 
   implicit val S = Strategy.fromFixedDaemonPool(8)
 
@@ -18,10 +20,8 @@ object TaggedStreamSpec extends Properties("TaggedStream"){
 
     fs2.async.unboundedQueue[Task, Int].flatMap{ queue =>
 
-      val tagged = TaggedStream.fromStream(queue.dequeue)
-
       (source.to(queue.enqueue).drain ++
-        tagged.takeThrough(_ != 1).take(2).drain ++
+        queue.dequeue.through(internal.takeThroughDrain(_ != 1)).take(2).drain ++
         Stream.eval(queue.dequeue1)
       ).runLast
     }.unsafeRunFor(10.second) ?= Some(3)
@@ -35,11 +35,8 @@ object TaggedStreamSpec extends Properties("TaggedStream"){
     val source = Stream[Task, Int](2, 2, 2, 2, 2, 2, 1, 3)
 
     fs2.async.unboundedQueue[Task, Int].flatMap{ queue =>
-
-      val tagged = TaggedStream.fromStream(queue.dequeue)
-
       (source.to(queue.enqueue).drain ++
-        tagged.takeThrough(_ != 1).drain ++
+        queue.dequeue.through(internal.takeThroughDrain(_ != 1)).drain ++
         Stream.eval(queue.dequeue1)
         ).runLast
     }.unsafeRunFor(10.second) ?= Some(3)

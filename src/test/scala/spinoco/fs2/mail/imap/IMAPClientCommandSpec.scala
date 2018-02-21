@@ -6,21 +6,20 @@ import fs2.util.syntax._
 import org.scalacheck.Properties
 import org.scalacheck.Prop._
 import spinoco.fs2.mail.imap.IMAPClient.impl.{IMAPData, IMAPText}
-import spinoco.fs2.mail.internal.TaggedStream
 
 object IMAPClientCommandSpec extends Properties("IMAPClient.request") {
 
   implicit val S = Strategy.fromFixedDaemonPool(8)
   implicit val F = implicitly[Async[Task]]
 
-  def createTagged(shouldFail: Task[Boolean], count: Int, done: Task[Unit]): TaggedStream[Task, IMAPData] = {
-    TaggedStream.fromStream(Stream.unfoldEval(count){ s =>
+  def createTagged(shouldFail: Task[Boolean], count: Int, done: Task[Unit]): Stream[Task, IMAPData] = {
+    Stream.unfoldEval(count){ s =>
       shouldFail.flatMap{
         case false if s > 0 => F.pure(Some(IMAPText(s"* $s") -> (s - 1)))
         case false => done >> F.pure(None)
         case true => F.fail(new Throwable("Closed before drained"))
       }
-    })
+    }
   }
 
   property("cmd.release.after.drain") = protect{

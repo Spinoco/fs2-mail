@@ -15,7 +15,6 @@ import shapeless.tag.@@
 import spinoco.fs2.mail.imap.IMAPCommand._
 import spinoco.fs2.mail.interop.ByteVectorChunk
 import spinoco.fs2.mail.encoding.{base64, charset, quotedPrintable}
-import spinoco.fs2.mail.internal.TaggedStream
 import spinoco.protocol.mail.EmailHeader
 import spinoco.protocol.mail.header.codec.EmailHeaderCodec
 import spinoco.protocol.mail.imap.codec.IMAPBodyPartCodec
@@ -168,9 +167,7 @@ object IMAPClient {
       def send(line: String): F[Unit] =
         socket.write(Chunk.bytes(line.getBytes), None)
 
-      val tagged = TaggedStream.fromStream(incomingQ.dequeue)
-
-      val request = requestCmd(idxRef, requestSemaphore, tagged, send) _
+      val request = requestCmd(idxRef, requestSemaphore, incomingQ.dequeue, send) _
 
       val client =
         new IMAPClient[F] {
@@ -280,7 +277,7 @@ object IMAPClient {
     def requestCmd[F[_]](
       idxRef: Async.Ref[F, Long]
       , requestSemaphore: Semaphore[F]
-      , fromServer: TaggedStream[F, IMAPData]
+      , fromServer: Stream[F, IMAPData]
       , toServer: String => F[Unit]
     )(cmd: IMAPCommand)(implicit F: Async[F]): RequestResult[F] = {
       Stream.eval_(requestSemaphore.decrement) ++
@@ -290,10 +287,10 @@ object IMAPClient {
         def unlock = Stream.eval(requestSemaphore.increment)
 
         Stream.eval_(toServer(commandLine)) ++
-        fromServer.takeThrough {
+        fromServer.through(spinoco.fs2.mail.internal.takeThroughDrain{
           case IMAPText(l) => ! l.startsWith(tag)
           case _  => true
-        }.uncons1.flatMap {
+        }).uncons1.flatMap {
           case None => unlock.map { _ => Left("* BAD Connection with server terminated") }
           case Some((IMAPText(resp), tail)) =>
             if (resp.startsWith(tag)) {
