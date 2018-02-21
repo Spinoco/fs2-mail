@@ -108,5 +108,4 @@ object base64 {
   def decode[F[_]]:Pipe[F, Byte, Byte] =
     decodeRaw(Alphabets.Base64)
 
-
 }

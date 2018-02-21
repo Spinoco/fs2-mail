@@ -287,22 +287,22 @@ object IMAPClient {
         def unlock = Stream.eval(requestSemaphore.increment)
 
         Stream.eval_(toServer(commandLine)) ++
-        fromServer.uncons1 flatMap {
-          case None => unlock map { _ => Left("* BAD Connection with server terminated") }
+        fromServer.through(spinoco.fs2.mail.internal.takeThroughDrain{
+          case IMAPText(l) => ! l.startsWith(tag)
+          case _  => true
+        }).uncons1.flatMap {
+          case None => unlock.map { _ => Left("* BAD Connection with server terminated") }
           case Some((IMAPText(resp), tail)) =>
             if (resp.startsWith(tag)) {
-              if (resp.drop(tag.size).trim.startsWith("OK")) unlock map { _ =>  Right(Stream.empty) } // no result ok was just received
-              else unlock map { _ => Left(resp.drop(tag.size)) }  // failure
+              if (resp.drop(tag.size).trim.startsWith("OK")) tail.drain ++ unlock.map { _ =>  Right(Stream.empty) } // no result ok was just received
+              else tail.drain ++ unlock.map { _ => Left(resp.drop(tag.size)) }  // failure
             } else {
               Stream(Right(
                 Stream.emit[F, IMAPData](IMAPText(resp)) ++
-                tail.takeThrough {
-                  case IMAPText(l) => ! l.startsWith(tag)
-                  case _  => true
-                }.dropLastIf {
+                tail.dropLastIf {
                   case IMAPText(l) => l.startsWith(tag)
                   case _ => false
-                } onFinalize { requestSemaphore.increment }
+                }.onFinalize { requestSemaphore.increment }
               ))
             }
 

@@ -9,8 +9,6 @@ import shapeless.the
 import spinoco.fs2.mail.interop.ByteVectorChunk
 
 object base64Spec extends Properties("base64") {
-
-
   case class EncodingSample(chunkSize:Int, text:String, alphabet: Base64Alphabet)
 
   implicit val encodingTestInstance : Arbitrary[EncodingSample] = Arbitrary {
@@ -31,7 +29,6 @@ object base64Spec extends Properties("base64") {
       Right(ByteVector.view(sample.text.getBytes).toBase64(sample.alphabet))
     )
   }
-
 
   property("decodes.base64") = forAll { sample: EncodingSample =>
     val encoded = ByteVector.view(sample.text.getBytes).toBase64(sample.alphabet)
@@ -54,8 +51,6 @@ object base64Spec extends Properties("base64") {
         .chunks
         .fold(ByteVector.empty){ case (acc, n) => acc ++ ByteVectorChunk.asByteVector(n)}
         .runLog.unsafeRun()
-
-
 
     r ?= Vector(ByteVector.view(sample.text.getBytes))
 
