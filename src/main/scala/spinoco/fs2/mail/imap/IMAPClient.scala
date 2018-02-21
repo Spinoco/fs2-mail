@@ -671,7 +671,7 @@ object IMAPClient {
     }
 
 
-    /** From stream of IMAP data builds a stream of strings. **/
+    /** from the stream of lines build string of string where {sz} expanded segments are returned as ASCII string (not individual lines)**/
     def concatLines[F[_]]: Pipe[F, IMAPData, String] = { _ map {
       case IMAPText(l) => l
       case IMAPBytes(bv) => new String(bv.toArray)
