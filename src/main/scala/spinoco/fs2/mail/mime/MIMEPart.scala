@@ -164,8 +164,8 @@ object MIMEPart {
     */
   @deprecated("Deprecated in favour of [[MIMEPart.alternative]]", "0.1.1")
   def alternate[F[_]](
-    fallback: SinglePart[F]
-    , alternative: SinglePart[F]
+    fallback: MIMEPart[F]
+    , alternative: MIMEPart[F]
     , boundary: => String = s"---${ UUID.randomUUID() }---${ UUID.randomUUID() }---"
   ): MultiPart[F] =
     MIMEPart.alternative(fallback, alternative, boundary)
@@ -179,8 +179,8 @@ object MIMEPart {
     *                       contain any whitespaces.
     */
   def alternative[F[_]](
-    fallback: SinglePart[F]
-    , alternative: SinglePart[F]
+    fallback: MIMEPart[F]
+    , alternative: MIMEPart[F]
     , boundary: => String = s"---${ UUID.randomUUID() }---${ UUID.randomUUID() }---"
   ): MultiPart[F] =
     multipart(subtype = "alternative", parts = Stream(fallback, alternative), boundary = boundary)
@@ -200,6 +200,23 @@ object MIMEPart {
     , boundary: => String = s"---${ UUID.randomUUID() }---${ UUID.randomUUID() }---"
   ): MultiPart[F] =
     multipart(subtype = "mixed", parts = parts, boundary = boundary)
+
+  /**
+    * Creates a MIME part with related message content.
+    * @see https://tools.ietf.org/html/rfc2387
+    *
+    * @param mainPart       Displayed part. Contains links to related parts (cid:Content-Id)
+    * @param related        Related parts referenced from mainPart.
+    * @param boundary       A boundary string denoting one part. This string cannot be longer than 70 characters and must not
+    *                       contain any whitespaces.
+    */
+  def related[F[_]](
+    mainPart: SinglePart[F]
+    , related: Stream[F, MIMEPart[F]]
+    , boundary: => String = s"---${ UUID.randomUUID() }---${ UUID.randomUUID() }---"
+  ): MultiPart[F] = {
+    multipart(subtype = "related", parts = Stream(mainPart) ++ related, boundary = boundary)
+  }
 
   /**
     * Creates a multipart with supplied subtype and encoding.
