@@ -63,9 +63,9 @@ object MIMEEncodeMultipartSpec extends Properties("MIMEEncodeMultipart") {
     .unsafeRun() ?=
     """Subject: Test Email
       |Date: Tue, 12 Dec 2017 07:32:10 +0000
-      |From: John Doe <john.doe@mail.com>
-      |To: Phil Doe <phil.doe@mail.com>
-      |Content-Type: multipart/alternative; boundary=----boundary---
+      |From: "John Doe" <john.doe@mail.com>
+      |To: "Phil Doe" <phil.doe@mail.com>
+      |Content-Type: multipart/alternative; boundary="----boundary---"
       |Content-Transfer-Encoding: 8bit
       |
       |------boundary---
@@ -133,13 +133,13 @@ object MIMEEncodeMultipartSpec extends Properties("MIMEEncodeMultipart") {
       .unsafeRun() ?=
       """Subject: Test Email
         |Date: Tue, 12 Dec 2017 07:32:10 +0000
-        |From: John Doe <john.doe@mail.com>
-        |To: Phil Doe <phil.doe@mail.com>
-        |Content-Type: multipart/mixed; boundary=---mixed-boundary---
+        |From: "John Doe" <john.doe@mail.com>
+        |To: "Phil Doe" <phil.doe@mail.com>
+        |Content-Type: multipart/mixed; boundary="---mixed-boundary---"
         |Content-Transfer-Encoding: 8bit
         |
         |-----mixed-boundary---
-        |Content-Type: multipart/alternative; boundary=----alt-boundary---
+        |Content-Type: multipart/alternative; boundary="----alt-boundary---"
         |Content-Transfer-Encoding: 8bit
         |
         |------alt-boundary---
@@ -171,7 +171,7 @@ object MIMEEncodeMultipartSpec extends Properties("MIMEEncodeMultipart") {
         |-----mixed-boundary---
         |Content-Type: image/jpeg
         |Content-Transfer-Encoding: base64
-        |Content-ID: jpeg-picture
+        |Content-ID: <jpeg-picture>
         |Content-Disposition: attachment; filename="awesome.jpeg"
         |
         |  AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1N

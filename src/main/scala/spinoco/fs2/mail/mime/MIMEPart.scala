@@ -238,7 +238,7 @@ object MIMEPart {
     MultiPart(
       header =
         MIMEHeader(List.empty)
-        .contentType(ContentType.MultiPartContent(mediaType))
+        .contentType(ContentType.MultiPartContent(mediaType, None))
         .transferEncoding(encoding)
       , boundary = boundaryId
       , parts = parts

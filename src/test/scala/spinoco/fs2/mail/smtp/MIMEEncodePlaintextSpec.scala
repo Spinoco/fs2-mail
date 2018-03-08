@@ -45,8 +45,8 @@ object MIMEEncodePlaintextSpec extends Properties("MIMEEncodePlaintext") {
     .unsafeRun() ?=
       """Subject: Test Email
         |Date: Tue, 12 Dec 2017 07:32:10 +0000
-        |From: John Doe <john.doe@mail.com>
-        |To: Phil Doe <phil.doe@mail.com>
+        |From: "John Doe" <john.doe@mail.com>
+        |To: "Phil Doe" <phil.doe@mail.com>
         |Content-Type: text/plain; charset=utf-8
         |Content-Transfer-Encoding: quoted-printable
         |
@@ -81,8 +81,8 @@ object MIMEEncodePlaintextSpec extends Properties("MIMEEncodePlaintext") {
       .unsafeRun() ?=
       """Subject: Test Email
         |Date: Tue, 12 Dec 2017 07:32:10 +0000
-        |From: John Doe <john.doe@mail.com>
-        |To: Phil Doe <phil.doe@mail.com>
+        |From: "John Doe" <john.doe@mail.com>
+        |To: "Phil Doe" <phil.doe@mail.com>
         |Content-Type: text/plain; charset=iso-8859-2
         |Content-Transfer-Encoding: quoted-printable
         |
@@ -115,8 +115,8 @@ object MIMEEncodePlaintextSpec extends Properties("MIMEEncodePlaintext") {
     .unsafeRun() ?=
     """Subject: Test Email
       |Date: Tue, 12 Dec 2017 07:32:10 +0000
-      |From: John Doe <john.doe@mail.com>
-      |To: Phil Doe <phil.doe@mail.com>
+      |From: "John Doe" <john.doe@mail.com>
+      |To: "Phil Doe" <phil.doe@mail.com>
       |Content-Type: text/plain; charset=utf-8
       |Content-Transfer-Encoding: base64
       |
