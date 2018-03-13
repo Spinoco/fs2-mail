@@ -61,11 +61,12 @@ object lines {
             val chunks = bv.grouped(length)
             val lastChunk = chunks.lastOption.getOrElse(ByteVector.empty)
             val chunksOut = if (lastChunk.nonEmpty) chunks.init else chunks
-            Pull.output(ByteVectorChunk(ByteVector.concat(chunksOut.map(h => prefixBytes ++ h ++ crlf)) ++ result)) >> go(lastChunk)(h)
+            Pull.output(ByteVectorChunk(result ++ ByteVector.concat(chunksOut.map(h => prefixBytes ++ h ++ crlf)))) >> go(lastChunk)(h)
           }
         } else {
           val (head, t) = bv.splitAt(idx)
-          makeLines(t.drop(crlf.size), result ++ prefixBytes ++ head ++ crlf)(h)
+          val linesOut = head.grouped(length).map(h => prefixBytes ++ h ++ crlf)
+          makeLines(t.drop(crlf.size), result ++ ByteVector.concat(linesOut))(h)
         }
       }
 
@@ -79,7 +80,6 @@ object lines {
           else Pull.output(ByteVectorChunk(prefixBytes ++ buff ++ crlf))
       }
     }
-
     _.pull(go(ByteVector.empty))
   }
 
