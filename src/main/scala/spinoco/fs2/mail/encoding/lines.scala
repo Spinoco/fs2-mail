@@ -46,28 +46,40 @@ object lines {
   def blockLines[F[_]](prefix: Int = 2, length: Int = 73): Pipe[F, Byte, Byte] = {
     val prefixBytes = ByteVector.view((" " * prefix).getBytes)
     def go(buff: ByteVector): Handle[F, Byte] => Pull[F, Byte, Unit] = {
+
+      def makeLines(bv: ByteVector, result: ByteVector = ByteVector.empty)(h: Handle[F, Byte]): Pull[F, Byte, Unit] = {
+        val idx = bv.indexOfSlice(crlf)
+        if (idx < 0) {
+          val head = bv.take(length)
+          if (head.size < length) {
+            if (result.nonEmpty) {
+              Pull.output(ByteVectorChunk(result)) >> go(bv)(h)
+            } else {
+              go(bv)(h)
+            }
+          } else {
+            val chunks = bv.grouped(length)
+            val lastChunk = chunks.lastOption.getOrElse(ByteVector.empty)
+            val chunksOut = if (lastChunk.nonEmpty) chunks.init else chunks
+            Pull.output(ByteVectorChunk(ByteVector.concat(chunksOut.map(h => prefixBytes ++ h ++ crlf)) ++ result)) >> go(lastChunk)(h)
+          }
+        } else {
+          val (head, t) = bv.splitAt(idx)
+          makeLines(t.drop(crlf.size), result ++ prefixBytes ++ head ++ crlf)(h)
+        }
+      }
+
       _.receiveOption {
         case Some((ch, h)) =>
           val bv = buff ++ ByteVectorChunk.asByteVector(ch)
-          val idx = bv.indexOfSlice(crlf)
-          if (idx < 0) {
-            val head = bv.take(length)
-            if (head.size < length) go(bv)(h)
-            else
-              Pull.output(ByteVectorChunk(prefixBytes ++ head ++ crlf)) >>
-              go(ByteVector.empty)(h.push(ByteVectorChunk(bv.drop(length))))
-
-          } else {
-            val (head, t) = bv.splitAt(idx)
-            Pull.output(ByteVectorChunk(prefixBytes ++ head ++ crlf)) >>
-            go(ByteVector.empty)(h.push(ByteVectorChunk(t.drop(crlf.size))))
-          }
+          makeLines(bv)(h)
 
         case None =>
           if (buff.isEmpty) Pull.done
           else Pull.output(ByteVectorChunk(prefixBytes ++ buff ++ crlf))
       }
     }
+
     _.pull(go(ByteVector.empty))
   }
 
