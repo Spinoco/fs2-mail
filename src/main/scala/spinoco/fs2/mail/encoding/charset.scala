@@ -36,10 +36,13 @@ object charset {
 
   /** decodes bytes given supplied charset into stream of utf8 strings **/
   def decode[F[_]](chs: Charset)(implicit F: Effect[F]): Pipe[F, Byte, Char] = { s =>
-    Stream.eval(F.delay(chs.newDecoder())) flatMap { decoder =>
+    Stream.eval(F.delay(
+      chs.newDecoder()
+        .onMalformedInput(CodingErrorAction.REPLACE)
+        .onUnmappableCharacter(CodingErrorAction.REPLACE)
+    )) flatMap { decoder =>
 
       def go(buff: ByteVector): Pipe[F, Chunk[Byte], Char] = {
-
         _.uncons1 flatMap {
           case Some((chunk, tail)) =>
             if (chunk.isEmpty) go(buff)(tail)
@@ -59,7 +62,7 @@ object charset {
                   Stream.chunk(outChunk) ++ go(buff0)(tail)
 
                 case other =>
-                  Stream.fail(new Throwable(s"Unexpected Result when decodeing: $other"))
+                  Stream.fail(new Throwable(s"Unexpected Result when decoding: $other"))
               }
             }
 
