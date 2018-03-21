@@ -38,7 +38,8 @@ object quotedPrintable {
             ByteVector.fromHexDescriptive(new String(next.tail.take(2).toArray), HexUppercase) match {
               case Right(bv) =>
                 decodeBV(next.drop(3), acc ++ ok ++ bv)
-              case Left(err) => Left(s"Failed to decode hex from : ${next.tail.take(2).decodeUtf8} :$err at ${next.decodeUtf8}")
+              case Left(_) =>
+                decodeBV(next.tail, acc ++ ok)
             }
           }
         }
@@ -46,7 +47,7 @@ object quotedPrintable {
     }
 
 
-    def go (buff: ByteVector): Pipe[F, Chunk[Byte], Byte] = {
+    def go(buff: ByteVector): Pipe[F, Chunk[Byte], Byte] = {
       _.uncons1.flatMap {
         case Some((chunk, tail)) =>
           val bs = chunk.toBytes
