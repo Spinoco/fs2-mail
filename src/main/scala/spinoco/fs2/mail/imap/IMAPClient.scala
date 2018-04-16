@@ -216,8 +216,12 @@ object IMAPClient {
 
       concurrent.join(Int.MaxValue)(Stream(
         Stream.emit(client)
-        , received.drain
-        , handshakeInitial.drain
+        , received.onError(t => Stream.eval_{
+          F.delay(println(s"Error in Socket: ${t.getMessage}"))
+        }).drain
+        , handshakeInitial.onError(t => Stream.eval_{
+          F.delay(println(s"Error in handshake: ${t.getMessage}"))
+        }).drain
       ))
       .interruptWhen(terminated)
       .onFinalize(terminated.set(true))
