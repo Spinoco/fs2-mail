@@ -150,6 +150,7 @@ object IMAPClient {
     import impl._
 
     Stream.eval(async.signalOf[F, Boolean](false)) flatMap { terminated =>
+    Stream.eval(Async.refOf[F, Option[Throwable]](None)) flatMap { reason =>
     Stream.eval(Async.refOf[F, Long](0l)) flatMap { idxRef =>
     Stream.eval(async.semaphore(0)) flatMap { requestSemaphore =>
     Stream.eval(async.boundedQueue[F, IMAPData](bufferLines)) flatMap { incomingQ =>
@@ -217,17 +218,20 @@ object IMAPClient {
       concurrent.join(Int.MaxValue)(Stream(
         Stream.emit(client)
         , received.onError(t => Stream.eval_{
-          F.delay(println(s"Error in Socket: ${t.getMessage}")) >>
+            reason.setPure(Some(t)) >>
             terminated.set(true)
         }).drain
         , handshakeInitial.onError(t => Stream.eval_{
-          F.delay(println(s"Error in handshake: ${t.getMessage}")) >>
+            reason.setPure(Some(t)) >>
             terminated.set(true)
         }).drain
       ))
       .interruptWhen(terminated)
-      .onFinalize(terminated.set(true))
-    }}}}
+      .onFinalize(terminated.set(true)) ++ Stream.eval(reason.get).flatMap {
+        case None => Stream.empty
+        case Some(t) => Stream.fail(t)
+      }
+    }}}}}
   }
 
 
