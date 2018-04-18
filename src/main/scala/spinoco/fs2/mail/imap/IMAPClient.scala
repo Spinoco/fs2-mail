@@ -150,25 +150,27 @@ object IMAPClient {
     import impl._
 
     Stream.eval(async.signalOf[F, Boolean](false)) flatMap { terminated =>
-    Stream.eval(Async.refOf[F, Option[Throwable]](None)) flatMap { reason =>
     Stream.eval(Async.refOf[F, Long](0l)) flatMap { idxRef =>
     Stream.eval(async.semaphore(0)) flatMap { requestSemaphore =>
     Stream.eval(async.boundedQueue[F, IMAPData](bufferLines)) flatMap { incomingQ =>
 
-      val received =
-        (
-          socket.reads(maxReadBytes, None) through
-          lines through
-          incomingQ.enqueue
-        ) interruptWhen terminated
+      def dequeueIncoming: Stream[F, IMAPData] = {
+        incomingQ.dequeue interruptWhen terminated
+      }
+
+      val received = {
+        socket.reads(maxReadBytes, None) through
+        lines through
+        incomingQ.enqueue
+      }
 
       val handshakeInitial =
-        incomingQ.dequeue through concatLines takeWhile { ! _.startsWith("* OK") } onFinalize (requestSemaphore.increment)
+        dequeueIncoming through concatLines takeWhile { ! _.startsWith("* OK") } onFinalize (requestSemaphore.increment)
 
       def send(line: String): F[Unit] =
         socket.write(Chunk.bytes(line.getBytes), None)
 
-      val request = requestCmd(idxRef, requestSemaphore, incomingQ.dequeue, send) _
+      val request = requestCmd(idxRef, requestSemaphore, dequeueIncoming, send) _
 
       val client =
         new IMAPClient[F] {
@@ -217,21 +219,11 @@ object IMAPClient {
 
       concurrent.join(Int.MaxValue)(Stream(
         Stream.emit(client)
-        , received.onError(t => Stream.eval_{
-            reason.setPure(Some(t)) >>
-            terminated.set(true)
-        }).drain
-        , handshakeInitial.onError(t => Stream.eval_{
-            reason.setPure(Some(t)) >>
-            terminated.set(true)
-        }).drain
-      ))
-      .interruptWhen(terminated)
-      .onFinalize(terminated.set(true)) ++ Stream.eval(reason.get).flatMap {
-        case None => Stream.empty
-        case Some(t) => Stream.fail(t)
-      }
-    }}}}}
+        , received.onError(_ => Stream.eval_(terminated.set(true))).drain
+        , handshakeInitial.onError(_ => Stream.eval_(terminated.set(true))).drain
+      )).interruptWhen(terminated)
+      .onFinalize(terminated.set(true))
+    }}}}
   }
 
 
