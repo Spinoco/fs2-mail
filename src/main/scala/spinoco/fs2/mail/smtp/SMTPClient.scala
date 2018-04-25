@@ -1,7 +1,5 @@
 package spinoco.fs2.mail.smtp
 
-
-
 import fs2._
 import fs2.async.mutable.Semaphore
 import fs2.io.tcp.Socket
@@ -106,7 +104,6 @@ object SMTPClient {
     Stream.eval(async.semaphore(0)) flatMap { sending =>
     Stream.eval(F.ref[String]) flatMap { serverIdRef =>
 
-
       // initialize the SMTP client to await first line (welcome) from the server.
       // also when this terminates the sending semaphore is open.
       def initialize =
@@ -116,11 +113,10 @@ object SMTPClient {
       // sends requests and collects any response
       implicit val sendRequest = impl.sendRequest(sendTimeout, sending) _
 
-      Stream.eval(F.start(initialize)) map { _ =>
+      Stream.eval(initialize) map { _ =>
       new SMTPClient[F] {
         def serverId: F[String] = serverIdRef.get
         def connect(domain: String): F[Seq[String]] =
-          F.delay(println(s"SMTP connect to: $domain")) >>
           sendRequest(impl.connect(domain)).map(_.map(_.data))
 
         def login(userName: String, password: String): F[Unit] =
@@ -232,18 +228,12 @@ object SMTPClient {
        timeout: FiniteDuration
       , sending: Semaphore[F]
     )(data: Stream[F, Byte])(implicit socket: Socket[F], F: Effect[F]): F[Seq[SMTPResponse]] = {
-      F.delay(println("SMTP SendRequest")) >>
       sending.decrement >>
-      F.delay(println("SMTP SendRequest decrement")) >>
-      data.to(socket.writes()).run >>
-      F.delay(println("SMTP SendRequest data to socket")) >>
-      socket.reads(1024, Some(timeout)).through(readResponse).runLog.attempt flatMap {
-        case Right(rslt) =>
-          F.delay(println("SMTP SendRequest result ok")) >>
-          sending.increment as rslt
-        case Left(err) =>
-          F.delay(println(s"SMTP SendRequest result err: ${err.getMessage}")) >>
-          sending.increment >> F.fail(err)
+      ( data.to(socket.writes()).run >>
+        socket.reads(1024, Some(timeout)).through(readResponse).runLog
+      ).attempt flatMap {
+        case Right(rslt) => sending.increment as rslt
+        case Left(err) => sending.increment >> F.fail(err)
       }
     }
 
