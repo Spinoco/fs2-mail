@@ -161,7 +161,7 @@ object IMAPClient {
       }
 
       val received = {
-        socket.reads(maxReadBytes, Some(readTimeout)) through
+        socket.reads(maxReadBytes, None) through
         lines through
         incomingQ.enqueue
       }
