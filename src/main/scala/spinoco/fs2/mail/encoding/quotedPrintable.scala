@@ -61,7 +61,7 @@ object quotedPrintable {
           }
 
         case None =>
-          if (buff.isEmpty) Stream.empty
+          if (buff.isEmpty || buff == `=`) Stream.empty
           else Stream.fail(new Throwable(s"Unfinished bytes from quoted-printable: $buff"))
       }
     }
