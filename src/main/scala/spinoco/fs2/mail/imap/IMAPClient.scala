@@ -21,6 +21,7 @@ import spinoco.protocol.mail.imap.codec.IMAPBodyPartCodec
 import scala.collection.immutable.NumericRange
 import scala.util.{Failure, Success, Try}
 import scala.util.matching.Regex
+import scala.concurrent.duration._
 
 
 
@@ -142,6 +143,8 @@ object IMAPClient {
     */
   def mk[F[_]](
     socket: Socket[F]
+    , sendTimeout: FiniteDuration
+    , readTimeout: FiniteDuration
     , maxReadBytes: Int = 32*1024
     , bufferLines: Int = 64
     , emailHeaderCodec: Codec[EmailHeader] = EmailHeaderCodec.codec(100 * 1024) // 100K max header size
@@ -158,7 +161,7 @@ object IMAPClient {
       }
 
       val received = {
-        socket.reads(maxReadBytes, None) through
+        socket.reads(maxReadBytes, Some(readTimeout)) through
         lines through
         incomingQ.enqueue
       }
@@ -167,7 +170,7 @@ object IMAPClient {
         dequeueIncoming through concatLines takeWhile { ! _.startsWith("* OK") } onFinalize (requestSemaphore.increment)
 
       def send(line: String): F[Unit] =
-        socket.write(Chunk.bytes(line.getBytes), None)
+        socket.write(Chunk.bytes(line.getBytes), Some(sendTimeout))
 
       val request = requestCmd(idxRef, requestSemaphore, dequeueIncoming, send) _
 
