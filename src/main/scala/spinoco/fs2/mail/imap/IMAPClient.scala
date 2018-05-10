@@ -23,8 +23,6 @@ import scala.util.{Failure, Success, Try}
 import scala.util.matching.Regex
 import scala.concurrent.duration._
 
-
-
 /**
   * Simple IMAP client that allows to exchange messages(EMAIL) with server via IMAP protocol.
   *
@@ -181,6 +179,7 @@ object IMAPClient {
             shortContent(request(Select(mailbox)))(parseSelect[F])
 
           def examine(mailbox: @@[String, MailboxName]) =
+            F.delay(println(s"Examine $mailbox")) >>
             shortContent(request(Examine(mailbox)))(parseSelect[F])
 
           def list(reference: String, wildcardName: String): F[IMAPResult[Seq[IMAPMailbox]]] =
@@ -274,38 +273,50 @@ object IMAPClient {
     )(cmd: IMAPCommand)(implicit F: Async[F]): RequestResult[F] = {
       Stream.eval_(requestSemaphore.decrement) ++
       Stream.eval(idxRef.modify { _ + 1 } map { c => java.lang.Long.toHexString(c.now) }) flatMap { tag =>
-        val commandLine = s"$tag ${cmd.asIMAPv4}\r\n"
+        Stream.eval(fs2.async.signalOf[F, Boolean](true)) flatMap { drainFrom =>
+          val commandLine = s"$tag ${cmd.asIMAPv4}\r\n"
 
-        def unlock = Stream.eval(requestSemaphore.increment)
+          def unlock = Stream.eval(requestSemaphore.increment)
 
-        Stream.eval_(toServer(commandLine)) ++
-        fromServer.through(spinoco.fs2.mail.internal.takeThroughDrain{
-          case IMAPText(l) => ! l.startsWith(tag)
-          case _  => true
-        }).uncons1.flatMap {
-          case None => unlock.map { _ => Left("* BAD Connection with server terminated") }
-          case Some((IMAPText(resp), tail)) =>
-            if (resp.startsWith(tag)) {
-              if (resp.drop(tag.size).trim.startsWith("OK")) tail.drain ++ unlock.map { _ =>  Right(Stream.empty) } // no result ok was just received
-              else tail.drain ++ unlock.map { _ => Left(resp.drop(tag.size)) }  // failure
-            } else {
-              Stream(Right(
-                (Stream.emit[F, IMAPData](IMAPText(resp)) ++
-                tail.dropLastIf {
-                  case IMAPText(l) => l.startsWith(tag)
-                  case _ => false
-                }).onFinalize { requestSemaphore.increment }
-              ))
+          Stream.eval_(toServer(commandLine)) ++
+            fromServer.takeThrough {
+              case IMAPText(l) => !l.startsWith(tag)
+              case _ => true
+            }.uncons1.flatMap {
+              case None => unlock.map { _ => Left("* BAD Connection with server terminated") }
+              case Some((IMAPText(resp), tail)) =>
+                if (resp.startsWith(tag)) {
+                  if (resp.drop(tag.size).trim.startsWith("OK")) tail.drain ++ unlock.map { _ => Right(Stream.empty) } // no result ok was just received
+                  else tail.drain ++ unlock.map { _ => Left(resp.drop(tag.size)) } // failure
+                } else {
+                  Stream(Right(
+                    (Stream.emit[F, IMAPData](IMAPText(resp)) ++ tail.flatMap {
+                      case IMAPText(r) if r.startsWith(tag) => Stream.eval_(drainFrom.set(false))
+                      case other => Stream.emit(other)
+                    }).onFinalize {
+                      drainFrom.get.flatMap {
+                        case false => F.pure(())
+                        case true =>
+                          F.delay(println("Drain From")) >>
+                          tail.takeThrough {
+                            case IMAPText(l) => !l.startsWith(tag)
+                            case _ => true
+                          }.drain.run
+                      } >>
+                      requestSemaphore.increment
+                    }
+                  ))
+                }
+
+              case Some((IMAPBytes(_), _)) =>
+                // Seems we are not in valid state. Streamed line cannot be the first line received
+                // as the first line must contain {sz} macro.
+                // so its safe to fail here w/o consuming the bytes.
+                Stream.fail(new Throwable("Invalid client state initial response not received"))
+
             }
 
-          case Some((IMAPBytes(_), _)) =>
-            // Seems we are not in valid state. Streamed line cannot be the first line received
-            // as the first line must contain {sz} macro.
-            // so its safe to fail here w/o consuming the bytes.
-            Stream.fail(new Throwable("Invalid client state initial response not received"))
-
         }
-
       }
     }
 
@@ -557,7 +568,7 @@ object IMAPClient {
       * @tparam F
       * @return
       */
-    def rawContent[F[_]](result: RequestResult[F]): Stream[F, (Int, String, IMAPData)] = {
+    def rawContent[F[_]](result: RequestResult[F])(implicit F: Effect[F]): Stream[F, (Int, String, IMAPData)] = {
       def collectBytes( recordIdx: Int, key: String, in: Stream[F, IMAPData]): Stream[F, (Int, String, IMAPData)] = {
         def go(curr: Stream[F, IMAPData]): Stream[F, (Int, String, IMAPData)] = {
           curr.uncons1 flatMap {
@@ -655,6 +666,7 @@ object IMAPClient {
 
       result.flatMap {
         case Right(stream) =>
+//          Stream.eval_(F.delay(println("XXXXXX#########"))) ++
           findRecord(0, stream).scope
         case Left(err) =>
           Stream.fail(new Throwable(s"Failed to perform the command: $err"))
