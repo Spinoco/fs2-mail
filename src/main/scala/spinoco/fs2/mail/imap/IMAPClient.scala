@@ -333,10 +333,11 @@ object IMAPClient {
     def shortContent[F[_], A](stream: RequestResult[F])(f: Seq[String] => F[A])(implicit F: Catchable[F]): F[Either[String, A]] = {
       stream.flatMap {
         case Right(s) =>
+          println(s"Right: $s")
           s.through(concatLines).map{ s =>
             val line = s.dropWhile { c => c != '*'}
             if (line.headOption.contains('*')) line.tail
-            else  line
+            else s
           }.fold(Vector.empty[String])(_ :+ _)
           .evalMap(f)
           .map(Right(_))
@@ -375,9 +376,29 @@ object IMAPClient {
         }
       }
 
-    /** parses reult of FETCH xyz (BODYSTRUCTURE) request **/
+    /** parses result of FETCH xyz (BODYSTRUCTURE) request **/
     def parseBodyStructure[F[_]](lines: Seq[String])(implicit F: Effect[F]): F[Seq[EmailBodyPart]] = {
-      val line = lines.mkString
+
+      //creates String for BODYSTRUCTURE codec
+      def mkLine(lines: Seq[String]): String = {
+        def go(lines: Seq[String], appendLiteral: Boolean, result: String): String = {
+          lines.headOption match {
+            case Some(line) =>
+              if (appendLiteral) {
+                go(lines.tail, false, result + s"{${line.getBytes.length}}\r\n$line")
+              } else {
+                go(lines.tail, true, result + line)
+              }
+            case None =>
+              result
+          }
+        }
+
+        go(lines, false, "")
+      }
+
+      val line = mkLine(lines)
+
       val indexStart = line.indexOf("BODYSTRUCTURE")
       if (indexStart < 0) F.fail(new Throwable("Could not find start of body structure."))
       else {
