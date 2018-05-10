@@ -333,7 +333,6 @@ object IMAPClient {
     def shortContent[F[_], A](stream: RequestResult[F])(f: Seq[String] => F[A])(implicit F: Catchable[F]): F[Either[String, A]] = {
       stream.flatMap {
         case Right(s) =>
-          println(s"Right: $s")
           s.through(concatLines).map{ s =>
             val line = s.dropWhile { c => c != '*'}
             if (line.headOption.contains('*')) line.tail
