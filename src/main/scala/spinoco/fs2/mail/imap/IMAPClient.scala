@@ -350,16 +350,13 @@ object IMAPClient {
     }
 
     /** parses result of SELECT or EXAMINE commands **/
-    def parseSelect[F[_]](lines: Seq[String])(implicit F: Effect[F]): F[IMAPMailboxStatus] =
-      F.delay {
-        val status = IMAPMailboxStatus.parse(lines)
-        if (status == IMAPMailboxStatus(Nil, Nil, 0, 0, None, tag[MailUID](0l), None)) {
-          println(s"Empty IMAPMailboxStatus for lines: $lines")
-          status
-        } else {
-          status
-        }
+    def parseSelect[F[_]](lines: Seq[String])(implicit F: Effect[F]): F[IMAPMailboxStatus] = {
+      if (lines.isEmpty) {
+        F.fail(new Throwable("Empty response for SELECT/EXAMINE command."))
+      } else {
+        F.delay(IMAPMailboxStatus.parse(lines))
       }
+    }
 
 
     /** parses result of the search operation encoded as space delimeited ids of messages **/
