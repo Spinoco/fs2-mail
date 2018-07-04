@@ -1,6 +1,5 @@
 package spinoco.fs2.mail.imap
 
-
 import java.nio.charset.{Charset, StandardCharsets}
 
 import fs2._
@@ -22,8 +21,7 @@ import spinoco.protocol.mail.imap.codec.IMAPBodyPartCodec
 import scala.collection.immutable.NumericRange
 import scala.util.{Failure, Success, Try}
 import scala.util.matching.Regex
-
-
+import scala.concurrent.duration._
 
 /**
   * Simple IMAP client that allows to exchange messages(EMAIL) with server via IMAP protocol.
@@ -143,34 +141,28 @@ object IMAPClient {
     */
   def mk[F[_]](
     socket: Socket[F]
+    , sendTimeout: FiniteDuration
+    , readTimeout: FiniteDuration
     , maxReadBytes: Int = 32*1024
     , bufferLines: Int = 64
     , emailHeaderCodec: Codec[EmailHeader] = EmailHeaderCodec.codec(100 * 1024) // 100K max header size
   )(implicit F: Async[F]): Stream[F, IMAPClient[F]] = {
     import impl._
 
-    Stream.eval(async.signalOf[F, Boolean](false)) flatMap { terminated =>
     Stream.eval(Async.refOf[F, Long](0l)) flatMap { idxRef =>
     Stream.eval(async.semaphore(0)) flatMap { requestSemaphore =>
-    Stream.eval(async.boundedQueue[F, IMAPData](bufferLines)) flatMap { incomingQ =>
 
-      def dequeueIncoming: Stream[F, IMAPData] = {
-        incomingQ.dequeue interruptWhen terminated
-      }
-
-      val received = {
-        socket.reads(maxReadBytes, None) through
-        lines through
-        incomingQ.enqueue
+      def readIncoming: Stream[F, IMAPData] = {
+        socket.reads(maxReadBytes, Some(readTimeout)) through lines
       }
 
       val handshakeInitial =
-        dequeueIncoming through concatLines takeWhile { ! _.startsWith("* OK") } onFinalize (requestSemaphore.increment)
+        readIncoming through concatLines takeWhile { ! _.startsWith("* OK") } onFinalize (requestSemaphore.increment)
 
       def send(line: String): F[Unit] =
-        socket.write(Chunk.bytes(line.getBytes), None)
+        socket.write(Chunk.bytes(line.getBytes), Some(sendTimeout))
 
-      val request = requestCmd(idxRef, requestSemaphore, dequeueIncoming, send) _
+      val request = requestCmd(idxRef, requestSemaphore, readIncoming, send) _
 
       val client =
         new IMAPClient[F] {
@@ -187,6 +179,7 @@ object IMAPClient {
             shortContent(request(Select(mailbox)))(parseSelect[F])
 
           def examine(mailbox: @@[String, MailboxName]) =
+            F.delay(println(s"Examine $mailbox")) >>
             shortContent(request(Examine(mailbox)))(parseSelect[F])
 
           def list(reference: String, wildcardName: String): F[IMAPResult[Seq[IMAPMailbox]]] =
@@ -217,13 +210,9 @@ object IMAPClient {
           }
       }
 
-      concurrent.join(Int.MaxValue)(Stream(
-        Stream.emit(client)
-        , received.onError(_ => Stream.eval_(terminated.set(true))).drain
-        , handshakeInitial.onError(_ => Stream.eval_(terminated.set(true))).drain
-      )).interruptWhen(terminated)
-      .onFinalize(terminated.set(true))
-    }}}}
+      Stream.emit(client) mergeDrainR handshakeInitial
+
+    }}
   }
 
 
@@ -283,38 +272,40 @@ object IMAPClient {
       , toServer: String => F[Unit]
     )(cmd: IMAPCommand)(implicit F: Async[F]): RequestResult[F] = {
       Stream.eval_(requestSemaphore.decrement) ++
-      Stream.eval(idxRef.modify { _ + 1 } map { c => java.lang.Long.toHexString(c.now) }) flatMap { tag =>
+        Stream.eval(idxRef.modify(_ + 1) map { c => java.lang.Long.toHexString(c.now) }) flatMap { tag =>
         val commandLine = s"$tag ${cmd.asIMAPv4}\r\n"
 
         def unlock = Stream.eval(requestSemaphore.increment)
 
         Stream.eval_(toServer(commandLine)) ++
-        fromServer.through(spinoco.fs2.mail.internal.takeThroughDrain{
-          case IMAPText(l) => ! l.startsWith(tag)
-          case _  => true
-        }).uncons1.flatMap {
-          case None => unlock.map { _ => Left("* BAD Connection with server terminated") }
-          case Some((IMAPText(resp), tail)) =>
-            if (resp.startsWith(tag)) {
-              if (resp.drop(tag.size).trim.startsWith("OK")) tail.drain ++ unlock.map { _ =>  Right(Stream.empty) } // no result ok was just received
-              else tail.drain ++ unlock.map { _ => Left(resp.drop(tag.size)) }  // failure
-            } else {
-              Stream(Right(
-                (Stream.emit[F, IMAPData](IMAPText(resp)) ++
-                tail.dropLastIf {
-                  case IMAPText(l) => l.startsWith(tag)
-                  case _ => false
-                }).onFinalize { requestSemaphore.increment }
-              ))
+          fromServer.takeThrough {
+            case IMAPText(l) => !l.startsWith(tag)
+            case _ => true
+          }.chunkN(Int.MaxValue).flatMap { chunks =>
+            chunks.headOption match {
+              case None => unlock.map { _ => Left("* BAD Connection with server terminated") }
+              case Some(firstChunk) =>
+                firstChunk.head match {
+                  case IMAPText(resp) =>
+                    if (resp.startsWith(tag)) {
+                      if (resp.drop(tag.size).trim.startsWith("OK")) unlock.map { _ => Right(Stream.empty) } // no result ok was just received
+                      else unlock.map { _ => Left(resp.drop(tag.size)) } // failure
+                    } else {
+                      Stream(Right(
+                        Stream(chunks: _*).flatMap(Stream.chunk).dropLast.onFinalize {
+                          requestSemaphore.increment
+                        }
+                      ))
+                    }
+
+                  case IMAPBytes(_) =>
+                    // Seems we are not in valid state. Streamed line cannot be the first line received
+                    // as the first line must contain {sz} macro.
+                    // so its safe to fail here w/o consuming the bytes.
+                    Stream.fail(new Throwable("Invalid client state initial response not received"))
+                }
             }
-
-          case Some((IMAPBytes(_), _)) =>
-            // Seems we are not in valid state. Streamed line cannot be the first line received
-            // as the first line must contain {sz} macro.
-            // so its safe to fail here w/o consuming the bytes.
-            Stream.fail(new Throwable("Invalid client state initial response not received"))
-
-        }
+          }
 
       }
     }
@@ -335,7 +326,7 @@ object IMAPClient {
           s.through(concatLines).map{ s =>
             val line = s.dropWhile { c => c != '*'}
             if (line.headOption.contains('*')) line.tail
-            else  line
+            else s
           }.fold(Vector.empty[String])(_ :+ _)
           .evalMap(f)
           .map(Right(_))
@@ -359,8 +350,13 @@ object IMAPClient {
     }
 
     /** parses result of SELECT or EXAMINE commands **/
-    def parseSelect[F[_]](lines: Seq[String])(implicit F: Monad[F]): F[IMAPMailboxStatus] =
-      F.pure { IMAPMailboxStatus.parse(lines) }
+    def parseSelect[F[_]](lines: Seq[String])(implicit F: Effect[F]): F[IMAPMailboxStatus] = {
+      if (lines.isEmpty) {
+        F.fail(new Throwable("Empty response for SELECT/EXAMINE command."))
+      } else {
+        F.delay(IMAPMailboxStatus.parse(lines))
+      }
+    }
 
 
     /** parses result of the search operation encoded as space delimeited ids of messages **/
@@ -374,9 +370,29 @@ object IMAPClient {
         }
       }
 
-    /** parses reult of FETCH xyz (BODYSTRUCTURE) request **/
+    /** parses result of FETCH xyz (BODYSTRUCTURE) request **/
     def parseBodyStructure[F[_]](lines: Seq[String])(implicit F: Effect[F]): F[Seq[EmailBodyPart]] = {
-      val line = lines.mkString
+
+      //creates String for BODYSTRUCTURE codec
+      def mkLine(lines: Seq[String]): String = {
+        def go(lines: Seq[String], appendLiteral: Boolean, result: String): String = {
+          lines.headOption match {
+            case Some(line) =>
+              if (appendLiteral) {
+                go(lines.tail, false, result + s"{${line.getBytes.length}}\r\n$line")
+              } else {
+                go(lines.tail, true, result + line)
+              }
+            case None =>
+              result
+          }
+        }
+
+        go(lines, false, "")
+      }
+
+      val line = mkLine(lines)
+
       val indexStart = line.indexOf("BODYSTRUCTURE")
       if (indexStart < 0) F.fail(new Throwable("Could not find start of body structure."))
       else {
@@ -567,7 +583,7 @@ object IMAPClient {
       * @tparam F
       * @return
       */
-    def rawContent[F[_]](result: RequestResult[F]): Stream[F, (Int, String, IMAPData)] = {
+    def rawContent[F[_]](result: RequestResult[F])(implicit F: Effect[F]): Stream[F, (Int, String, IMAPData)] = {
       def collectBytes( recordIdx: Int, key: String, in: Stream[F, IMAPData]): Stream[F, (Int, String, IMAPData)] = {
         def go(curr: Stream[F, IMAPData]): Stream[F, (Int, String, IMAPData)] = {
           curr.uncons1 flatMap {
@@ -665,6 +681,7 @@ object IMAPClient {
 
       result.flatMap {
         case Right(stream) =>
+//          Stream.eval_(F.delay(println("XXXXXX#########"))) ++
           findRecord(0, stream).scope
         case Left(err) =>
           Stream.fail(new Throwable(s"Failed to perform the command: $err"))

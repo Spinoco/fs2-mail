@@ -1,7 +1,5 @@
 package spinoco.fs2.mail.smtp
 
-
-
 import fs2._
 import fs2.async.mutable.Semaphore
 import fs2.io.tcp.Socket
@@ -106,7 +104,6 @@ object SMTPClient {
     Stream.eval(async.semaphore(0)) flatMap { sending =>
     Stream.eval(F.ref[String]) flatMap { serverIdRef =>
 
-
       // initialize the SMTP client to await first line (welcome) from the server.
       // also when this terminates the sending semaphore is open.
       def initialize =
@@ -116,7 +113,7 @@ object SMTPClient {
       // sends requests and collects any response
       implicit val sendRequest = impl.sendRequest(sendTimeout, sending) _
 
-      Stream.eval(F.start(initialize)) map { _ =>
+      Stream.eval(initialize) map { _ =>
       new SMTPClient[F] {
         def serverId: F[String] = serverIdRef.get
         def connect(domain: String): F[Seq[String]] =
@@ -232,8 +229,9 @@ object SMTPClient {
       , sending: Semaphore[F]
     )(data: Stream[F, Byte])(implicit socket: Socket[F], F: Effect[F]): F[Seq[SMTPResponse]] = {
       sending.decrement >>
-      data.to(socket.writes()).run >>
-      socket.reads(1024, Some(timeout)).through(readResponse).runLog.attempt flatMap {
+      ( data.to(socket.writes()).run >>
+        socket.reads(1024, Some(timeout)).through(readResponse).runLog
+      ).attempt flatMap {
         case Right(rslt) => sending.increment as rslt
         case Left(err) => sending.increment >> F.fail(err)
       }
