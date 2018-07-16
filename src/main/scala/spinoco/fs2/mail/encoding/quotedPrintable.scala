@@ -1,6 +1,5 @@
 package spinoco.fs2.mail.encoding
 
-
 import fs2._
 import scodec.bits.Bases.Alphabets.HexUppercase
 import scodec.bits.ByteVector
@@ -117,7 +116,7 @@ object quotedPrintable {
       go(bv, ByteVector.empty, MAX_LINE_SZ)
     }
 
-    _.through(lines.byCrLf)
+    _.through(lines.byCrLf).chunks
     .map(ByteVectorChunk.asByteVector)
     .map(encodeLine)
     .intersperse(crlf)
