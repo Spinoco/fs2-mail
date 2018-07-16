@@ -8,22 +8,23 @@ object lines {
 
   /** decodes bytes in chunk of bytes by supplied separator. Last line is emitted even when not terminated by `separator` **/
   def by[F[_]](separator: ByteVector): Pipe[F, Byte, Chunk[Byte]] = {
-    def go(buff: ByteVector): Pipe[F, Byte, Chunk[Byte]] = {
-      _.uncons.flatMap {
+    def go(buff: ByteVector): Handle[F, Byte] => Pull[F, Chunk[Byte], Unit] = {
+      _.receiveOption {
         case Some((ch, t)) =>
           val data = buff ++ ByteVectorChunk.asByteVector(ch)
           val idx = data.indexOfSlice(separator)
           if (idx < 0) go(data)(t)
           else {
             val (h, t0) = data.splitAt(idx)
-            if (t0.isEmpty) Stream.emit(ByteVectorChunk(h)) ++ go(ByteVector.empty)(t)
-            else Stream.emit(ByteVectorChunk(h)) ++ go(ByteVector.empty)(Stream.chunk(ByteVectorChunk(t0.drop(separator.size))) ++ t)
+            if (t0.isEmpty) Pull.output(Chunk.singleton(ByteVectorChunk(h))) >> go(ByteVector.empty)(t)
+            else Pull.output(Chunk.singleton(ByteVectorChunk(h))) >> go(ByteVector.empty)(t.push(ByteVectorChunk(t0.drop(separator.size))))
           }
 
-        case None => Stream.emit(ByteVectorChunk(buff))
+        case None =>
+          Pull.output(Chunk.singleton(ByteVectorChunk(buff)))
       }
     }
-    go(ByteVector.empty)(_).scope
+    _.pull(go(ByteVector.empty))
   }
 
   /** decodes bytes to chunks according to supplied separator **/
