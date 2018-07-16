@@ -116,7 +116,7 @@ object quotedPrintable {
       go(bv, ByteVector.empty, MAX_LINE_SZ)
     }
 
-    _.through(lines.byCrLf).chunks
+    _.through(lines.byCrLf)
     .map(ByteVectorChunk.asByteVector)
     .map(encodeLine)
     .intersperse(crlf)
