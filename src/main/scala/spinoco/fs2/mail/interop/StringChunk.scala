@@ -7,23 +7,11 @@ final class StringChunk(val stringValue: String) extends Chunk[Char] {
 
   def apply(i: Int): Char = stringValue(i)
 
-  def copyToArray[B >: Char](xs: Array[B], start: Int): Unit =
-    stringValue.getChars(start, start + xs.length, xs.asInstanceOf[Array[Char]], 0)
+  protected def splitAtChunk_(n: Int): (Chunk[Char], Chunk[Char]) = {
+    val (h, t) = stringValue.splitAt(n)
+    (StringChunk(h), StringChunk(t))
+  }
 
-  def drop(n: Int): Chunk[Char] =
-    StringChunk(stringValue.drop(n))
-
-  def take(n: Int): Chunk[Char] =
-    StringChunk(stringValue.take(n))
-
-  def filter(f: Char => Boolean): Chunk[Char] =
-    StringChunk(stringValue.filter(f))
-
-  def foldLeft[B](z: B)(f: (B, Char) => B): B =
-    stringValue.foldLeft(z)(f)
-
-  def foldRight[B](z: B)(f: (Char, B) => B): B =
-    stringValue.foldRight(z)(f)
 }
 
 

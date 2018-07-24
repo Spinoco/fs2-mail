@@ -1,10 +1,12 @@
 package spinoco.fs2.mail.smtp
 
+import cats.effect.IO
 import fs2._
+import fs2.interop.scodec.ByteVectorChunk
 import org.scalacheck._
 import org.scalacheck.Prop._
 import scodec.bits.ByteVector
-import spinoco.fs2.mail.interop.ByteVectorChunk
+
 import spinoco.fs2.mail.mime.SMTPResponse
 import spinoco.fs2.mail.mime.SMTPResponse.Code
 
@@ -20,13 +22,16 @@ object SMTPClientSpec extends Properties("SMTPClient"){
         |x.
         |......
       """.stripMargin.lines.mkString("\r\n").getBytes))
-    ).covary[Task]
-    .chunkLimit(chunkSize).flatMap(Stream.chunk)
+    ).covary[IO]
+    .chunkLimit(chunkSize).flatMap(ch => Stream.chunk(ch))
     .through(SMTPClient.impl.insertDotIfNeeded)
-    .chunks.map(ByteVectorChunk.asByteVector)
-    .runLog
+    .chunks.map { ch =>
+      val bs = ch.toBytes
+      ByteVector.view(bs.values, bs.offset, bs.size)
+    }
+    .compile.toVector
     .map(_.reduce(_ ++ _).decodeUtf8.right.toOption.getOrElse("").lines.mkString("\r\n"))
-    .unsafeRun() ?=
+    .unsafeRunSync() ?=
       """Line
         |..
         | .
@@ -42,10 +47,10 @@ object SMTPClientSpec extends Properties("SMTPClient"){
       """220 smtp.gmail.com ESMTP k185sm1251101wma.28 - gsmtp
         |
       """.stripMargin.lines.mkString("\r\n").getBytes
-    )))
-    .chunkLimit(chunkSize).flatMap(Stream.chunk)
-    .through(SMTPClient.impl.readResponse[Task])
-    .runLog.unsafeRun() ?= Vector(
+    ))).covary[IO]
+    .chunkLimit(chunkSize).flatMap(ch => Stream.chunk(ch))
+    .through(SMTPClient.impl.readResponse[IO])
+    .compile.toVector.unsafeRunSync() ?= Vector(
       SMTPResponse(Code.Ready, "smtp.gmail.com ESMTP k185sm1251101wma.28 - gsmtp")
     )
   }
@@ -63,10 +68,10 @@ object SMTPClientSpec extends Properties("SMTPClient"){
         |250 SMTPUTF8
         |
       """.stripMargin.lines.mkString("\r\n").getBytes
-    )))
-      .chunkLimit(chunkSize).flatMap(Stream.chunk)
-      .through(SMTPClient.impl.readResponse[Task])
-      .runLog.unsafeRun() ?= Vector(
+    ))).covary[IO]
+      .chunkLimit(chunkSize).flatMap(ch => Stream.chunk(ch))
+      .through(SMTPClient.impl.readResponse[IO])
+      .compile.toVector.unsafeRunSync() ?= Vector(
       SMTPResponse(Code.Completed, "smtp.gmail.com at your service, [31.186.185.166]")
       , SMTPResponse(Code.Completed, "SIZE 35882577")
       , SMTPResponse(Code.Completed, "8BITMIME")

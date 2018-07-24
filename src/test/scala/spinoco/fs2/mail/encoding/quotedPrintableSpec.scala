@@ -1,5 +1,6 @@
 package spinoco.fs2.mail.encoding
 
+import cats.effect.IO
 import fs2._
 import org.scalacheck.{Gen, Prop, Properties}
 import org.scalacheck.Prop._
@@ -11,22 +12,22 @@ object quotedPrintableSpec extends Properties("quotedPrintable") {
     val toEncode = raw.mkString("\r\n")
 
     val decoded =
-      Stream.chunk(Chunk.bytes(toDecode.getBytes)).covary[Task]
-      .chunkLimit(chunkSize).flatMap(Stream.chunk)
+      Stream.chunk(Chunk.bytes(toDecode.getBytes)).covary[IO]
+      .chunkLimit(chunkSize).flatMap(ch => Stream.chunk(ch))
       .through(quotedPrintable.decode)
       .through(text.utf8Decode)
       .through(text.lines)
-      .runLog
-      .unsafeRun()
+      .compile.toVector
+      .unsafeRunSync()
 
     val encoded =
-      Stream.chunk(Chunk.bytes(toEncode.getBytes)).covary[Task]
-      .chunkLimit(chunkSize).flatMap(Stream.chunk)
+      Stream.chunk(Chunk.bytes(toEncode.getBytes)).covary[IO]
+      .chunkLimit(chunkSize).flatMap(ch => Stream.chunk(ch))
       .through(quotedPrintable.encode)
       .through(text.utf8Decode)
       .through(text.lines)
-      .runLog
-      .unsafeRun()
+      .compile.toVector
+      .unsafeRunSync()
 
     def dump(expect: Seq[String], result: Seq[String]): String = {
       expect.zip(result).zipWithIndex.flatMap { case ((e, r), idx) =>

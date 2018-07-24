@@ -2,23 +2,26 @@ package spinoco.fs2.mail.imap
 
 import java.nio.charset.{Charset, StandardCharsets}
 
+import cats.Applicative
+import cats.syntax.all._
+import cats.effect.{Effect, Sync}
 import fs2._
+import fs2.async.Ref
 import fs2.async.mutable.Semaphore
+import fs2.interop.scodec.ByteVectorChunk
 import fs2.io.tcp.Socket
-import fs2.util.{Async, Catchable, Effect, Monad}
-import fs2.util.syntax._
 import scodec.{Attempt, Codec}
 import scodec.bits.{BitVector, ByteVector}
 import shapeless.tag
 import shapeless.tag.@@
+
 import spinoco.fs2.mail.imap.IMAPCommand._
-import spinoco.fs2.mail.interop.ByteVectorChunk
 import spinoco.fs2.mail.encoding.{base64, charset, quotedPrintable}
 import spinoco.protocol.mail.EmailHeader
 import spinoco.protocol.mail.header.codec.EmailHeaderCodec
 import spinoco.protocol.mail.imap.codec.IMAPBodyPartCodec
-
 import scala.collection.immutable.NumericRange
+import scala.concurrent.ExecutionContext
 import scala.util.{Failure, Success, Try}
 import scala.util.matching.Regex
 import scala.concurrent.duration._
@@ -146,11 +149,11 @@ object IMAPClient {
     , maxReadBytes: Int = 32*1024
     , bufferLines: Int = 64
     , emailHeaderCodec: Codec[EmailHeader] = EmailHeaderCodec.codec(100 * 1024) // 100K max header size
-  )(implicit F: Async[F]): Stream[F, IMAPClient[F]] = {
+  )(implicit F: Effect[F], EC: ExecutionContext): Stream[F, IMAPClient[F]] = {
     import impl._
 
-    Stream.eval(Async.refOf[F, Long](0l)) flatMap { idxRef =>
-    Stream.eval(async.semaphore(0)) flatMap { requestSemaphore =>
+    Stream.eval(async.refOf[F, Long](0l)) flatMap { idxRef =>
+    Stream.eval(async.semaphore[F](0)) flatMap { requestSemaphore =>
 
       def readIncoming: Stream[F, IMAPData] = {
         socket.reads(maxReadBytes, Some(readTimeout)) through lines
@@ -192,7 +195,7 @@ object IMAPClient {
             rawContent(request(UID(Fetch(range, Seq(IMAPFetchContent.UID, IMAPFetchContent.Body(BodySection.HEADER))))))
             .through(fetchLog)
             .through(mkEmailHeader(emailHeaderCodec))
-            .runFold(Vector.empty[IMAPEmailHeader])(_ :+ _)
+            .compile.fold(Vector.empty[IMAPEmailHeader])(_ :+ _)
 
           def bodyStructureOf(uid: @@[Long, MailUID]): F[IMAPResult[Seq[EmailBodyPart]]] =
             shortContent(request(UID(Fetch(NumericRange(uid:Long, uid:Long, 1), Seq(IMAPFetchContent.BODYSTRUCTURE)))))(parseBodyStructure[F])
@@ -210,7 +213,7 @@ object IMAPClient {
           }
       }
 
-      Stream.emit(client) mergeDrainR handshakeInitial
+      Stream.emit(client) merge handshakeInitial.drain
 
     }}
   }
@@ -261,51 +264,59 @@ object IMAPClient {
       * @param toServer           Will send one line to server
       *
       * @param cmd
-      * @param F
       * @tparam F
       * @return
       */
-    def requestCmd[F[_]](
-      idxRef: Async.Ref[F, Long]
+    def requestCmd[F[_] : Effect](
+      idxRef: Ref[F, Long]
       , requestSemaphore: Semaphore[F]
       , fromServer: Stream[F, IMAPData]
       , toServer: String => F[Unit]
-    )(cmd: IMAPCommand)(implicit F: Async[F]): RequestResult[F] = {
-      Stream.eval_(requestSemaphore.decrement) ++
-        Stream.eval(idxRef.modify(_ + 1) map { c => java.lang.Long.toHexString(c.now) }) flatMap { tag =>
+    )(cmd: IMAPCommand)(implicit EC: ExecutionContext): RequestResult[F] = {
+      // note that this implementation releases lock once the whole stream terminates
+      // as such the user must finish consuming this stream before next command is requested.
+      // this is internal to library, users using this as `F` and only in case of body this produces Stream[F, Byte]
+      Stream.eval(requestSemaphore.decrement) >>
+      Stream.eval(idxRef.modify(_ + 1) map { c => java.lang.Long.toHexString(c.now) }) flatMap { tag =>
+
         val commandLine = s"$tag ${cmd.asIMAPv4}\r\n"
 
-        def unlock = Stream.eval(requestSemaphore.increment)
+        def unlock = Pull.eval(requestSemaphore.increment)
 
         Stream.eval_(toServer(commandLine)) ++
-          fromServer.takeThrough {
-            case IMAPText(l) => !l.startsWith(tag)
-            case _ => true
-          }.chunkN(Int.MaxValue).flatMap { chunks =>
-            chunks.headOption match {
-              case None => unlock.map { _ => Left("* BAD Connection with server terminated") }
-              case Some(firstChunk) =>
-                firstChunk.head match {
-                  case IMAPText(resp) =>
-                    if (resp.startsWith(tag)) {
-                      if (resp.drop(tag.size).trim.startsWith("OK")) unlock.map { _ => Right(Stream.empty) } // no result ok was just received
-                      else unlock.map { _ => Left(resp.drop(tag.size)) } // failure
-                    } else {
-                      Stream(Right(
-                        Stream(chunks: _*).flatMap(Stream.chunk).dropLast.onFinalize {
-                          requestSemaphore.increment
-                        }
-                      ))
-                    }
+          fromServer.through(spinoco.fs2.mail.internal.takeThroughDrain[F, IMAPData] {
+            case IMAPText(l) => ! l.startsWith(tag)
+            case _  => true
+          }).pull.uncons1.flatMap {
+            case None => unlock.map { _ => Left("* BAD Connection with server terminated") }
+            case Some((IMAPText(resp), tail)) =>
+              if (resp.startsWith(tag)) {
+                // thisresolves corner case when server immediatelly responds with OK or failure
+                if (resp.drop(tag.size).trim.startsWith("OK")) Pull.output1(Right(Stream.empty.covaryAll[F, IMAPData])) // no result ok was just received
+                else Pull.output1(Left(resp.drop(tag.size)))   // failure
+              } else {
+                // Server responded with data and they are echoed to resulting Strema
+                // if user won't process the stream or early terminates the strem the `takeThroughDrain` assures we will read all response from server up to end of the result.
+                //
+                Pull.output1(Right(
+                  Stream.emit[IMAPData](IMAPText(resp)).covary[F] ++
+                  tail.dropLastIf {
+                    case IMAPText(l) => l.startsWith(tag)
+                    case _ => false
+                  }
+                ))
+              }
 
-                  case IMAPBytes(_) =>
-                    // Seems we are not in valid state. Streamed line cannot be the first line received
-                    // as the first line must contain {sz} macro.
-                    // so its safe to fail here w/o consuming the bytes.
-                    Stream.fail(new Throwable("Invalid client state initial response not received"))
-                }
-            }
+            case Some((IMAPBytes(_), _)) =>
+              // Seems we are not in valid state. Streamed line cannot be the first line received
+              // as the first line must contain {sz} macro.
+              // so its safe to fail here w/o consuming the bytes.
+              Pull.raiseError(new Throwable("Invalid client state initial response not received"))
+
           }
+          .stream
+          .onFinalize(requestSemaphore.increment)
+
 
       }
     }
@@ -320,7 +331,7 @@ object IMAPClient {
       * @tparam A
       * @return
       */
-    def shortContent[F[_], A](stream: RequestResult[F])(f: Seq[String] => F[A])(implicit F: Catchable[F]): F[Either[String, A]] = {
+    def shortContent[F[_] : Sync, A](stream: RequestResult[F])(f: Seq[String] => F[A]): F[Either[String, A]] = {
       stream.flatMap {
         case Right(s) =>
           s.through(concatLines).map{ s =>
@@ -332,27 +343,27 @@ object IMAPClient {
           .map(Right(_))
 
         case Left(err) => Stream.emit(Left(err))
-      }.runLast.map(_.getOrElse(Left("Command failed to be processed, no output from server?")))
+      }.compile.last.map(_.getOrElse(Left("Command failed to be processed, no output from server?")))
     }
 
     /** parses login response, returning any supported capabiliites **/
-    def parseLogin[F[_]](lines: Seq[String])(implicit F: Monad[F]): F[Seq[String]] =
+    def parseLogin[F[_]](lines: Seq[String])(implicit F: Applicative[F]): F[Seq[String]] =
       parseCapability(lines)
 
     /** parse capability results **/
-    def parseCapability[F[_]](lines: Seq[String])(implicit F: Monad[F]): F[Seq[String]] = {
+    def parseCapability[F[_]](lines: Seq[String])(implicit F: Applicative[F]): F[Seq[String]] = {
       F.pure { lines.flatMap { l => l.trim.split("\\s").toSeq } }
     }
 
     /** parses result of LIST command **/
-    def parseMailboxList[F[_]](lines: Seq[String])(implicit F: Monad[F]): F[Seq[IMAPMailbox]] = {
+    def parseMailboxList[F[_]](lines: Seq[String])(implicit F: Applicative[F]): F[Seq[IMAPMailbox]] = {
       F.pure { lines.flatMap(s => IMAPMailbox.fromListResult(s)) }
     }
 
     /** parses result of SELECT or EXAMINE commands **/
-    def parseSelect[F[_]](lines: Seq[String])(implicit F: Effect[F]): F[IMAPMailboxStatus] = {
+    def parseSelect[F[_]](lines: Seq[String])(implicit F: Sync[F]): F[IMAPMailboxStatus] = {
       if (lines.isEmpty) {
-        F.fail(new Throwable("Empty response for SELECT/EXAMINE command."))
+        F.raiseError(new Throwable("Empty response for SELECT/EXAMINE command."))
       } else {
         F.delay(IMAPMailboxStatus.parse(lines))
       }
@@ -360,7 +371,7 @@ object IMAPClient {
 
 
     /** parses result of the search operation encoded as space delimeited ids of messages **/
-    def parseSearchResult[F[_]](lines: Seq[String])(implicit F: Monad[F]): F[Seq[Long @@ MailUID]] =
+    def parseSearchResult[F[_]](lines: Seq[String])(implicit F: Applicative[F]): F[Seq[Long @@ MailUID]] =
       F.pure {
         lines.flatMap { l =>
           val trimmed = l.trim
@@ -394,11 +405,11 @@ object IMAPClient {
       val line = mkLine(lines)
 
       val indexStart = line.indexOf("BODYSTRUCTURE")
-      if (indexStart < 0) F.fail(new Throwable("Could not find start of body structure."))
+      if (indexStart < 0) F.raiseError(new Throwable("Could not find start of body structure."))
       else {
         IMAPBodyPartCodec.bodyStructure.decode(BitVector.view(("(" + line.drop(indexStart)).getBytes)) match {
           case Attempt.Successful(result) => F.pure(EmailBodyPart.flatten(result.value))
-          case Attempt.Failure(err) => F.fail(new Throwable(s"failed to decode BODYSTRUCTURE: $err ($lines)"))
+          case Attempt.Failure(err) => F.raiseError(new Throwable(s"failed to decode BODYSTRUCTURE: $err ($lines)"))
         }
       }
     }
@@ -431,7 +442,7 @@ object IMAPClient {
           case "BASE64" => base64.decode[F](s)
           case "QUOTED-PRINTABLE" => quotedPrintable.decode[F](s)
           case "7BIT" | "8BIT" | "BINARY" => s
-          case other => s.flatMap { _ => Stream.fail(new Throwable(s"Unsupported encoding: $other")) }
+          case other => s.flatMap { _ => Stream.raiseError(new Throwable(s"Unsupported encoding: $other")) }
         }
       }
 
@@ -465,7 +476,7 @@ object IMAPClient {
           case "BASE64" => base64.decode[F](s) through charset.decode(chs)
           case "QUOTED-PRINTABLE" => quotedPrintable.decode[F](s) through charset.decode(chs)
           case "7BIT" | "8BIT" | "BINARY" => s through charset.decode(chs)
-          case other => s.flatMap { _ => Stream.fail(new Throwable(s"Unsupported encoding: $other")) }
+          case other => s.flatMap { _ => Stream.raiseError(new Throwable(s"Unsupported encoding: $other")) }
         }
       }
 
@@ -556,7 +567,7 @@ object IMAPClient {
         ).left.map(err => new Throwable(s"Invalid data for email: $err  ($m)"))
       } flatMap {
         case Right(h) => Stream.emit(h)
-        case Left(err) => Stream.fail(err)
+        case Left(err) => Stream.raiseError(err)
       }
 
     }
@@ -584,43 +595,43 @@ object IMAPClient {
       * @return
       */
     def rawContent[F[_]](result: RequestResult[F])(implicit F: Effect[F]): Stream[F, (Int, String, IMAPData)] = {
-      def collectBytes( recordIdx: Int, key: String, in: Stream[F, IMAPData]): Stream[F, (Int, String, IMAPData)] = {
-        def go(curr: Stream[F, IMAPData]): Stream[F, (Int, String, IMAPData)] = {
-          curr.uncons1 flatMap {
-            case Some((d: IMAPBytes, tail)) =>
-              Stream.emit((recordIdx, key, d)) ++ go(tail)
+      def collectBytes(recordIdx: Int, key: String)(s: Stream[F, IMAPData]): Pull[F, (Int, String, IMAPData), Unit] = {
+        def go(s: Stream[F, IMAPData]): Pull[F, (Int, String, IMAPData), Unit] = {
+          s.pull.uncons1.flatMap {
+            case Some((d: IMAPBytes, tl)) =>
+              Pull.output1((recordIdx, key, d)) >> go(tl)
 
-            case Some((d: IMAPText, tail)) =>
-              findEntry(recordIdx, Stream.emit(d) ++ tail)
+            case Some((d: IMAPText, tl)) =>
+              findEntry(recordIdx)(Stream.emit(d) ++ tl)
 
             case None =>
-              Stream.fail(new Throwable(s"Expected end of bytes for record: $recordIdx, key: $key, but EOF reached"))
+              Pull.raiseError(new Throwable(s"Expected end of bytes for record: $recordIdx, key: $key, but EOF reached"))
           }
         }
 
-        in.uncons1 flatMap {
+        s.pull.uncons1.flatMap {
           case Some((d@IMAPBytes(bs), tail)) =>
-            Stream.emit((recordIdx, key, d)) ++ go(tail)
+            Pull.output1((recordIdx, key, d)) >> go(tail)
 
           case Some((IMAPText(l), _)) =>
-            Stream.fail(new Throwable(s"Expected bytes for record: $recordIdx, key: $key, but got $l"))
+            Pull.raiseError(new Throwable(s"Expected bytes for record: $recordIdx, key: $key, but got $l"))
 
           case None =>
-            Stream.fail(new Throwable(s"Expected bytes for record: $recordIdx, key: $key, but EOF reached"))
+            Pull.raiseError(new Throwable(s"Expected bytes for record: $recordIdx, key: $key, but EOF reached"))
         }
       }
 
 
       // finds entry in fetch response. Note that this will advance to find record once line starting with `*` is found.
-      def findEntry(recordIdx: Int, in: Stream[F, IMAPData]): Stream[F, (Int, String, IMAPData)] = {
-        in.uncons1 flatMap {
-          case Some((d@IMAPText(l), tail)) =>
-            if (l.startsWith("*")) findRecord(recordIdx + 1, Stream.emit(d) ++ tail)
-            else if (l.trim.startsWith(")")) findRecord(recordIdx + 1, tail) // just advance to next record, ignore line content
+      def findEntry(recordIdx: Int)(s: Stream[F, IMAPData]): Pull[F, (Int, String, IMAPData), Unit] = {
+        s.pull.uncons1.flatMap {
+          case Some((d@IMAPText(l), tl)) =>
+            if (l.startsWith("*")) findRecord(recordIdx + 1)(Stream.emit(d) ++ tl)
+            else if (l.trim.startsWith(")")) findRecord(recordIdx + 1)(tl) // just advance to next record, ignore line content
             else {
               // key is always terminated with space. lets try to find it
               val trimmed = l.trim
-              if (trimmed.isEmpty)  Stream.fail(new Throwable(s"Expected key of FETCH response, but got empty line"))
+              if (trimmed.isEmpty) Pull.raiseError(new Throwable(s"Expected key of FETCH response, but got empty line"))
               else {
                 val (key, valueCandidate) = {
                   val keyIdx = trimmed.indexOf(' ')
@@ -630,8 +641,8 @@ object IMAPClient {
 
                 def output(offset: Int, sz: Int) = { // end is > 0
                   val value = valueCandidate.slice(offset, sz)
-                  Stream.emit((recordIdx, key, IMAPText(value))) ++
-                  findEntry(recordIdx, Stream.emit(IMAPText(valueCandidate.drop(offset + sz + 1))) ++ tail)
+                  Pull.output1((recordIdx, key, IMAPText(value))) >>
+                  findEntry(recordIdx)(Stream.emit(IMAPText(valueCandidate.drop(offset + sz + 1))) ++ tl)
                 }
 
                 if (valueCandidate.startsWith("(")) {
@@ -639,52 +650,50 @@ object IMAPClient {
                   // value candidates shall not have nested brackets here
                   // todo: add more principled parsing based on the type of the key
                   val end = valueCandidate.indexOf(')')
-                  if (end < 0) Stream.fail(new Throwable(s"Expected value for $key in brackets, but got $valueCandidate"))
+                  if (end < 0) Pull.raiseError(new Throwable(s"Expected value for $key in brackets, but got $valueCandidate"))
                   else output(1, end - 1)
                 } else {
                   // take everything till next space, or switch to bytes mode if no entry
                   val end = valueCandidate.indexOf(' ')
-                  if (end <= 0) Stream.emit((recordIdx, key, IMAPBytes(ByteVector.empty))) ++ collectBytes(recordIdx, key, tail)
+                  if (end <= 0) Pull.output1((recordIdx, key, IMAPBytes(ByteVector.empty))) >> collectBytes(recordIdx, key)(tl)
                   else output(0, end)
                 }
               }
             }
 
           case Some((IMAPBytes(bv), tail)) =>
-            Stream.fail(new Throwable(s"Got bytes, when key of record was expected: $bv"))
+            Pull.raiseError(new Throwable(s"Got bytes, when key of record was expected: $bv"))
 
           case None =>
-            Stream.empty
+            Pull.done
         }
       }
 
 
       // Tries to find start of imap record, essentialy line starting with `* <tag> FETCH (` pattern
-      def findRecord(recordIdx: Int, in: Stream[F, IMAPData]): Stream[F, (Int, String, IMAPData)] = {
-        in.uncons1 flatMap {
+      def findRecord(recordIdx: Int)(s: Stream[F, IMAPData]): Pull[F, (Int, String, IMAPData), Unit] = {
+        s.pull.uncons1 flatMap {
           case Some((IMAPText(l), tail)) =>
             startOfRecord.findFirstMatchIn(l).flatMap(m => Option(m.group(1))) match {
-            case Some(start) =>
-              findEntry(recordIdx, Stream.emit(IMAPText(start)) ++ tail)
-            case None =>
-              if (successFullFetch.findFirstMatchIn(l).nonEmpty) Stream.empty
-              else Stream.fail(new Throwable(s"Expected start of record at $recordIdx, but got $l"))
-          }
+              case Some(start) =>
+                findEntry(recordIdx)(Stream.emit(IMAPText(start)) ++ tail)
+              case None =>
+                if (successFullFetch.findFirstMatchIn(l).nonEmpty) Pull.done
+                else Pull.raiseError(new Throwable(s"Expected start of record at $recordIdx, but got $l"))
+            }
 
           case Some((IMAPBytes(bv), _)) =>
-            Stream.fail(new Throwable(s"Got bytes, when start of record was expected: $bv"))
+            Pull.raiseError(new Throwable(s"Got bytes, when start of record was expected: $bv"))
 
           case None =>
-            Stream.empty
+            Pull.done
         }
       }
 
-      result.flatMap {
-        case Right(stream) =>
-//          Stream.eval_(F.delay(println("XXXXXX#########"))) ++
-          findRecord(0, stream).scope
-        case Left(err) =>
-          Stream.fail(new Throwable(s"Failed to perform the command: $err"))
+      result
+      .flatMap {
+        case Left(err) => Stream.raiseError(new Throwable(s"Failed to perform the command: $err"))
+        case Right(s) => findRecord(0)(s).stream
       }
 
     }
@@ -713,27 +722,29 @@ object IMAPClient {
     def lines[F[_]]: Pipe[F, Byte, IMAPData] = {
       val crlf = ByteVector.view("\r\n".getBytes)
 
-      def collectChunk(sz: Int, tail: Stream[F, Byte]): Stream[F, IMAPData] = {
-        tail.uncons.flatMap {
-          case Some((chunk, tail)) =>
-            val bv = ByteVectorChunk.asByteVector(chunk)
-            if (bv.size < sz) Stream.emit(IMAPBytes(bv)) ++ collectChunk(sz - bv.size.toInt, tail)
+      def collectChunk(sz: Int)(s: Stream[F, Byte]): Pull[F, IMAPData, Unit] = {
+        s.pull.unconsChunk.flatMap {
+          case Some((chunk, tl)) =>
+            val bs = chunk.toBytes
+            val bv =  ByteVector.view(bs.values, bs.offset, bs.size)
+            if (bv.size < sz) Pull.output1(IMAPBytes(bv)) >> collectChunk(sz - bv.size.toInt)(tl)
             else {
               val out = bv.take(sz)
-              Stream.emit(IMAPBytes(out)) ++ collectLines(ByteVector.empty, Stream.chunk(chunk.drop(sz)) ++ tail)
+              Pull.output1(IMAPBytes(out)) >> collectLines(ByteVector.empty)(Stream.chunk(chunk.drop(sz)) ++ tl)
             }
 
           case None =>
-            Stream.empty
+            Pull.done
         }
       }
 
-      def collectLines(buff: ByteVector, tail: Stream[F, Byte]):  Stream[F, IMAPData] = {
-        tail.uncons.flatMap {
-          case Some((chunk, tail)) =>
-            val nb = buff ++ ByteVectorChunk.asByteVector(chunk)
+      def collectLines(buff: ByteVector)(s: Stream[F, Byte]):  Pull[F, IMAPData, Unit] = {
+        s.pull.unconsChunk.flatMap {
+          case Some((chunk, tl)) =>
+            val bs = chunk.toBytes
+            val nb = buff ++ ByteVector.view(bs.values, bs.offset, bs.size)
             val lineIdx = nb.indexOfSlice(crlf)
-            if (lineIdx < 0) collectLines(nb, tail)
+            if (lineIdx < 0) collectLines(nb)(tl)
             else {
               val (bh, bt) = nb.splitAt(lineIdx)
               bh.decodeAscii match {
@@ -743,33 +754,33 @@ object IMAPClient {
                       case Some(m) =>
                         val line = m.group(1)
                         val num = m.group(2)
-                        if (line == null || num == null) Stream.fail(new Throwable(s"Expected line and num match, got: $line, $num from $s"))
+                        if (line == null || num == null) Pull.raiseError(new Throwable(s"Expected line and num match, got: $line, $num from $s"))
                         else {
                           Try(num.toInt) match {
                             case Success(sz) =>
-                              Stream.emit(IMAPText(line)) ++
-                                collectChunk(sz, Stream.chunk(ByteVectorChunk(bt.drop(2))) ++ tail)
+                              Pull.output1(IMAPText(line)) >>
+                              collectChunk(sz)(Stream.chunk(ByteVectorChunk(bt.drop(2))) ++ tl)
 
                             case Failure(err) =>
-                              Stream.fail(err)
+                              Pull.raiseError(err)
                           }
                         }
-                      case None => Stream.fail(new Throwable(s"Expected {sz} macro at end of line got : $s"))
+                      case None => Pull.raiseError(new Throwable(s"Expected {sz} macro at end of line got : $s"))
                     }
                   } else {
-                    Stream.emit(IMAPText(s)) ++
-                    collectLines(ByteVector.empty, Stream.chunk(ByteVectorChunk(bt.drop(2))) ++ tail)
+                    Pull.output1(IMAPText(s)) >>
+                    collectLines(ByteVector.empty)(Stream.chunk(ByteVectorChunk(bt.drop(2))) ++ tl)
                   }
 
-                case Left(err) => Stream.fail(err)
+                case Left(err) => Pull.raiseError(err)
               }
             }
 
-          case None => Stream.empty  // ignore last line not terminated by crlf
+          case None => Pull.done  // ignore last line not terminated by crlf
         }
       }
 
-      s => collectLines(ByteVector.empty, s).scope
+      collectLines(ByteVector.empty)(_).stream
     }
   }
 }

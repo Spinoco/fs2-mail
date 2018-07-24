@@ -2,11 +2,13 @@ package spinoco.fs2.mail.encoding
 
 import java.nio.charset.{Charset, StandardCharsets}
 
+import cats.effect.IO
 import fs2._
+import fs2.interop.scodec.ByteVectorChunk
 import org.scalacheck.{Gen, Properties}
 import org.scalacheck.Prop._
 import scodec.bits.ByteVector
-import spinoco.fs2.mail.interop.ByteVectorChunk
+
 
 
 object charsetSpec extends Properties("charset") {
@@ -57,21 +59,24 @@ object charsetSpec extends Properties("charset") {
     val encodedExpect = ByteVector.view(s.getBytes(chs))
 
     val decoded =
-      Stream.chunk(ByteVectorChunk(encodedExpect)).covary[Task]
-        .chunkLimit(sz).flatMap(Stream.chunk)
+      Stream.chunk(ByteVectorChunk(encodedExpect)).covary[IO]
+        .chunkLimit(sz).flatMap(ch => Stream.chunk(ch))
         .through(charset.decode(chs))
         .through(charset.stringChunks)
-        .runLog.map(_.mkString)
-        .unsafeRun()
+        .compile.toVector.map(_.mkString)
+        .unsafeRunSync()
 
     val encoded =
-      Stream.emit(s).covary[Task]
+      Stream.emit(s).covary[IO]
       .through(charset.charStream)
-      .chunkLimit(sz).flatMap(Stream.chunk)
+      .chunkLimit(sz).flatMap(ch => Stream.chunk(ch))
       .through(charset.encode(chs))
-      .chunks.map { ch => ByteVectorChunk.asByteVector(ch) }
-      .runLog.map { v => ByteVector.view(new String(v.reduceOption( _ ++ _).getOrElse(ByteVector.empty).toArray, chs).getBytes(chs))  }
-      .unsafeRun()
+      .chunks.map { ch =>
+        val bs = ch.toBytes
+        ByteVector.view(bs.values, bs.offset, bs.size)
+      }
+      .compile.toVector.map { v => ByteVector.view(new String(v.reduceOption( _ ++ _).getOrElse(ByteVector.empty).toArray, chs).getBytes(chs))  }
+      .unsafeRunSync()
 
     (decoded ?= s) &&
     (encoded ?= encodedExpect)

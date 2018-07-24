@@ -3,9 +3,11 @@ package spinoco.fs2.mail.mime
 import java.nio.charset.{Charset, StandardCharsets}
 import java.util.UUID
 
+import cats.effect.Sync
+
 import spinoco.protocol.mail.mime.{MIMEHeader, TransferEncoding}
 import fs2._
-import fs2.util.Effect
+
 import spinoco.fs2.mail.encoding
 import spinoco.fs2.mail.encoding.lines
 import spinoco.protocol.mail.mime.TransferEncoding.{DefaultEncodings, StandardEncoding}
@@ -56,7 +58,7 @@ object MIMEPart {
     * @param charset      Charset to encode the characters to
     * @param enc          Encoding to use
     */
-  def html[F[_] : Effect](
+  def html[F[_] : Sync](
     stream: Stream[F, Char]
     , charset: Charset = StandardCharsets.UTF_8
     , enc: StandardEncoding = TransferEncoding.QuotedPrintable
@@ -70,7 +72,7 @@ object MIMEPart {
     * @param charset      Charset to encode the characters to
     * @param enc          Encoding to use
     */
-  def plain[F[_] : Effect](
+  def plain[F[_] : Sync](
     stream: Stream[F, Char]
     , charset: Charset = StandardCharsets.UTF_8
     , enc: StandardEncoding = TransferEncoding.QuotedPrintable
@@ -85,7 +87,7 @@ object MIMEPart {
     * @param charset      Charset to encode the characters to
     * @param enc          Encoding to use
     */
-  def text[F[_] : Effect](
+  def text[F[_] : Sync](
     stream: Stream[F, Char]
     , tpe: DefaultMediaType
     , charset: Charset = StandardCharsets.UTF_8
