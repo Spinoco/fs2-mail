@@ -2,7 +2,7 @@
 
 Asynchronous, non-blocking IMAP/SMTP client for receiving and sending e-mails for scala.
 
-[![Build Status](https://travis-ci.org/Spinoco/fs2-mail.svg?branch=series/0.1)](https://travis-ci.org/Spinoco/fs2-mail)
+[![Build Status](https://travis-ci.org/Spinoco/fs2-mail.svg?branch=series/0.2)](https://travis-ci.org/Spinoco/fs2-mail)
 [![Gitter Chat](https://badges.gitter.im/functional-streams-for-scala/fs2.svg)](https://gitter.im/fs2-mail/Lobby)
 
 ## Overview
@@ -38,7 +38,7 @@ Add this to your sbt build file :
 for fs2 0.10.x series:
 
 ```
- // fs2-mail is currently not available for fs2 0.10.x
+libraryDependencies += "com.spinoco" %% "fs2-mail" % "0.2.0"
 ```
 
 for fs2 0.9.x series:
@@ -52,6 +52,7 @@ libraryDependencies += "com.spinoco" %% "fs2-mail" % "0.1.1"
 
 version  |    scala  |   fs2  |  scodec | shapeless      
 ---------|-----------|--------|---------|----------- 
+0.2.0    | 2.11, 2.12| 0.10.5 | 1.10.3  | 2.3.2
 0.1.1    | 2.11, 2.12| 0.9.7  | 1.10.3  | 2.3.2
 
 
@@ -68,8 +69,8 @@ uses single SMTP connection to send single message:
 import java.net.InetSocketAddress
 import java.time.ZonedDateTime
 
-import fs2._
-import fs2.util.syntax._
+import cats.effect.IO
+import fs2._ 
 import fs2.crypto.TLSEngine
 import fs2.crypto.io.tcp.TLSSocket
 
@@ -83,9 +84,9 @@ import spinoco.protocol.mail.EMailHeader
 
 
 
-io.tcp.client[Task](new InetSocketAddress("imap.gmail.com", 993)).flatMap { tcpSocket =>
-Stream.eval(TLSEngine[Task](clientTLS)).flatMap { tlsEngine =>
-Stream.eval(TLSSocket[Task](tcpSocket, tlsEngine)).flatMap { tlsSocket =>
+io.tcp.client[IO](new InetSocketAddress("imap.gmail.com", 993)).flatMap { tcpSocket =>
+Stream.eval(TLSEngine[IO](clientTLS)).flatMap { tlsEngine =>
+Stream.eval(TLSSocket[IO](tcpSocket, tlsEngine)).flatMap { tlsSocket =>
 smtp.client(tlsSocket).evalMap { smtpClient => 
 
     val header: EMailHeader = EMailHeader(
@@ -94,7 +95,7 @@ smtp.client(tlsSocket).evalMap { smtpClient =>
       , from = EmailAddress("alice", "mail.com", None)
       , to = EmailAddress("bob", "mail.com", None)
     )
-    val body: Stream[Task, Char] = Stream.chunk(StringChunk("A simple text-only email from fs2-mail."))
+    val body: Stream[IO, Char] = Stream.chunk(StringChunk("A simple text-only email from fs2-mail.")).covary[IO]
 
     smtpClient.connect("gmail.com") >>
     smtpClient.login("userName", "password") >>
@@ -147,9 +148,9 @@ import spinoco.fs2.mail.imap.MailboxName
 import spinoco.fs2.mail.imap.IMAPSearchTerm
 
 
- io.tcp.client[Task](new InetSocketAddress("imap.gmail.com", 993)).flatMap { tcpSocket => 
-  Stream.eval(TLSSocket[Task](tcpSocket, clientTLS)) flatMap { tlsSocket =>
-  imap.client[Task](tlsSocket) evalMap { imapClient =>
+ io.tcp.client[IO](new InetSocketAddress("imap.gmail.com", 993)).flatMap { tcpSocket => 
+  Stream.eval(TLSSocket[IO](tcpSocket, clientTLS)) flatMap { tlsSocket =>
+  imap.client[IO](tlsSocket) evalMap { imapClient =>
     // login with supplied credentials
     imapClient.login("EMAIL", "PASSWORD") >>
     // check for imap server capabilities 
