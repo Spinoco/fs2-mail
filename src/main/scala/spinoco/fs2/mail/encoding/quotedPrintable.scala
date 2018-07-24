@@ -1,9 +1,9 @@
 package spinoco.fs2.mail.encoding
 
 import fs2._
+import fs2.interop.scodec.ByteVectorChunk
 import scodec.bits.Bases.Alphabets.HexUppercase
 import scodec.bits.ByteVector
-import spinoco.fs2.mail.interop.ByteVectorChunk
 
 import scala.annotation.tailrec
 
@@ -46,27 +46,27 @@ object quotedPrintable {
     }
 
 
-    def go(buff: ByteVector): Pipe[F, Chunk[Byte], Byte] = {
-      _.uncons1.flatMap {
-        case Some((chunk, tail)) =>
+    def go(buff: ByteVector)(s: Stream[F, Byte]): Pull[F, Byte, Unit] = {
+      s.pull.unconsChunk.flatMap {
+        case Some((chunk, tl)) =>
           val bs = chunk.toBytes
           val bv = buff ++ ByteVector.view(bs.values, bs.offset, bs.size)
           decodeBV(bv, ByteVector.empty) match {
             case Right((decoded, remainder)) =>
-              Stream.chunk(ByteVectorChunk(decoded)) ++ go(remainder)(tail)
+              Pull.outputChunk(ByteVectorChunk(decoded)) >> go(remainder)(tl)
 
             case Left(err) =>
-              Stream.fail(new Throwable(s"Failed to decode from quotedPrintable: $err (${bv.decodeUtf8})"))
+              Pull.raiseError(new Throwable(s"Failed to decode from quotedPrintable: $err (${bv.decodeUtf8})"))
           }
 
         case None =>
-          if (buff.isEmpty || buff == `=`) Stream.empty
-          else Stream.fail(new Throwable(s"Unfinished bytes from quoted-printable: $buff"))
+          if (buff.isEmpty || buff == `=`) Pull.done
+          else Pull.raiseError(new Throwable(s"Unfinished bytes from quoted-printable: $buff"))
       }
     }
 
 
-    s => (s.chunks through go(ByteVector.empty)).scope
+    go(ByteVector.empty)(_).stream
   }
 
 
@@ -117,7 +117,10 @@ object quotedPrintable {
     }
 
     _.through(lines.byCrLf)
-    .map(ByteVectorChunk.asByteVector)
+    .map { ch =>
+      val bs = ch.toBytes
+      ByteVector.view(bs.values, bs.offset, bs.size)
+    }
     .map(encodeLine)
     .intersperse(crlf)
     .flatMap { bv => Stream.chunk(ByteVectorChunk(bv)) }

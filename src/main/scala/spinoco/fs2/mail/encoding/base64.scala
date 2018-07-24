@@ -1,9 +1,10 @@
 package spinoco.fs2.mail.encoding
 
-import fs2.{Handle, Pipe, Pull}
+import fs2._
+import fs2.interop.scodec.ByteVectorChunk
 import scodec.bits.Bases.{Alphabets, Base64Alphabet}
 import scodec.bits.{BitVector, ByteVector}
-import spinoco.fs2.mail.interop.ByteVectorChunk
+
 
 object base64 {
 
@@ -14,11 +15,11 @@ object base64 {
     * @return
     */
   def encodeRaw[F[_]](alphabet:Base64Alphabet):Pipe[F, Byte, Byte] = {
-    def go(rem:ByteVector):Handle[F,Byte] => Pull[F, Byte, Unit] = {
-      _.receiveOption {
+    def go(rem:ByteVector)(s: Stream[F,Byte]):Pull[F, Byte, Unit] = {
+      s.pull.unconsChunk.flatMap {
         case None =>
           if (rem.size == 0) Pull.done
-          else Pull.output(ByteVectorChunk(ByteVector.view(rem.toBase64(alphabet).getBytes)))
+          else Pull.outputChunk(ByteVectorChunk(ByteVector.view(rem.toBase64(alphabet).getBytes)))
 
         case Some((chunk, h)) =>
           val bs = chunk.toBytes
@@ -33,7 +34,7 @@ object base64 {
               out(pos) = alphabet.toChar(idx).toByte
               pos = pos + 1
             }
-            Pull.output(ByteVectorChunk(ByteVector.view(out))) >> go(n.takeRight(pad))(h)
+            Pull.outputChunk(ByteVectorChunk(ByteVector.view(out))) >> go(n.takeRight(pad))(h)
           } else {
             go(n)(h)
           }
@@ -41,7 +42,7 @@ object base64 {
       }
 
     }
-    _.pull(go(ByteVector.empty))
+    go(ByteVector.empty)(_).stream
   }
 
   /** encodes base64 encoded stream [[http://tools.ietf.org/html/rfc4648#section-5 RF4648 section 5]]. Whitespaces are ignored **/
@@ -60,11 +61,11 @@ object base64 {
     */
   def decodeRaw[F[_]](alphabet:Base64Alphabet):Pipe[F, Byte, Byte] = {
     val Pad = alphabet.pad
-    def go(remAcc:BitVector):Handle[F, Byte] => Pull[F, Byte, Unit] = {
-      _.receiveOption {
+    def go(remAcc:BitVector)(s:Stream[F, Byte]):Pull[F, Byte, Unit] = {
+      s.pull.unconsChunk.flatMap {
         case None => Pull.done
 
-        case Some((chunk,h)) =>
+        case Some((chunk,tl)) =>
           val bs = chunk.toBytes
           val bv = ByteVector.view(bs.values, bs.offset, bs.size)
           var acc = remAcc
@@ -84,20 +85,20 @@ object base64 {
               idx = idx + 1
             }
             val aligned = (acc.size / 8) * 8
-            if (aligned <= 0 && !term) go(acc)(h)
+            if (aligned <= 0 && !term) go(acc)(tl)
             else {
               val (out, rem) = acc.splitAt(aligned)
-              if (term) Pull.output(ByteVectorChunk(out.toByteVector))
-              else Pull.output(ByteVectorChunk(out.toByteVector)) >> go(rem)(h)
+              if (term) Pull.outputChunk(ByteVectorChunk(out.toByteVector))
+              else Pull.outputChunk(ByteVectorChunk(out.toByteVector)) >> go(rem)(tl)
             }
 
           } catch {
             case e: IllegalArgumentException =>
-              Pull.fail(new Throwable(s"Invalid base 64 encoding at index $idx", e))
+              Pull.raiseError(new Throwable(s"Invalid base 64 encoding at index $idx", e))
           }
       }
     }
-    _.pull(go(BitVector.empty))
+    go(BitVector.empty)(_).stream
   }
 
   /** decodes base64 encoded stream [[http://tools.ietf.org/html/rfc4648#section-5 RF4648 section 5]]. Whitespaces are ignored **/

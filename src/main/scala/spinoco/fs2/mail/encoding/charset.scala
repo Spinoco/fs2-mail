@@ -3,11 +3,12 @@ package spinoco.fs2.mail.encoding
 import java.nio.{ByteBuffer, CharBuffer}
 import java.nio.charset._
 
-import fs2.{Pipe, _}
-import fs2.util.Effect
+import cats.effect.Sync
+import fs2.interop.scodec.ByteVectorChunk
+import fs2._
 import scodec.bits.ByteVector
-import spinoco.fs2.mail.interop.{ByteVectorChunk, StringChunk}
 
+import spinoco.fs2.mail.interop.StringChunk
 import scala.annotation.tailrec
 
 object charset {
@@ -22,28 +23,28 @@ object charset {
     _.flatMap { s => Stream.chunk(StringChunk(s)) }
   }
 
-  def decodeAscii[F[_] : Effect]: Pipe[F, Byte, Char] =
+  def decodeAscii[F[_] : Sync]: Pipe[F, Byte, Char] =
     decode(StandardCharsets.US_ASCII)
 
-  def encodeAscii[F[_] : Effect]: Pipe[F, Char, Byte] =
+  def encodeAscii[F[_] : Sync]: Pipe[F, Char, Byte] =
     encode(StandardCharsets.US_ASCII)
 
-  def decodeUTF8[F[_] : Effect]: Pipe[F, Byte, Char] =
+  def decodeUTF8[F[_] : Sync]: Pipe[F, Byte, Char] =
     decode(StandardCharsets.UTF_8)
 
-  def encodeUTF8[F[_] : Effect]: Pipe[F, Char, Byte] =
+  def encodeUTF8[F[_] : Sync]: Pipe[F, Char, Byte] =
     encode(StandardCharsets.UTF_8)
 
   /** decodes bytes given supplied charset into stream of utf8 strings **/
-  def decode[F[_]](chs: Charset)(implicit F: Effect[F]): Pipe[F, Byte, Char] = { s =>
+  def decode[F[_]](chs: Charset)(implicit F: Sync[F]): Pipe[F, Byte, Char] = { s =>
     Stream.eval(F.delay(
       chs.newDecoder()
         .onMalformedInput(CodingErrorAction.REPLACE)
         .onUnmappableCharacter(CodingErrorAction.REPLACE)
     )) flatMap { decoder =>
 
-      def go(buff: ByteVector): Pipe[F, Chunk[Byte], Char] = {
-        _.uncons1 flatMap {
+      def go(buff: ByteVector)(s: Stream[F, Byte]): Pull[F, Char, Unit] = {
+        s.pull.unconsChunk.flatMap {
           case Some((chunk, tail)) =>
             if (chunk.isEmpty) go(buff)(tail)
             else {
@@ -53,30 +54,30 @@ object charset {
               val (result, outChunk) = impl.decodeBuff(decoder, bb, last = false)
               result match {
                 case CoderResult.OVERFLOW =>
-                  Stream.fail(new Throwable("Unexpected Decoding Overflow")) // impossible
+                  Pull.raiseError(new Throwable("Unexpected Decoding Overflow")) // impossible
 
                 case CoderResult.UNDERFLOW =>
                   // we may have still bytes remaining in input buffer, if so, we have to
                   // store these data and use in next invocation
                   val buff0 = if (bb.remaining() == 0) ByteVector.empty else ByteVector.view(bb)
-                  Stream.chunk(outChunk) ++ go(buff0)(tail)
+                  Pull.outputChunk(outChunk) >> go(buff0)(tail)
 
                 case other =>
-                  Stream.fail(new Throwable(s"Unexpected Result when decoding: $other"))
+                  Pull.raiseError(new Throwable(s"Unexpected Result when decoding: $other"))
               }
             }
 
           case None =>
-            def flush: Stream[F, Char] = {
-              Stream.eval(F.delay(impl.decodeFlush(decoder))) flatMap { case (result, out) => result match {
+            def flush: Pull[F, Char, Unit] = {
+              Pull.eval(F.delay(impl.decodeFlush(decoder))) flatMap { case (result, out) => result match {
                 case CoderResult.OVERFLOW =>
-                  Stream.fail(new Throwable("Unexpected Decoding Overflow (flush)")) // impossible
+                  Pull.raiseError(new Throwable("Unexpected Decoding Overflow (flush)")) // impossible
 
                 case CoderResult.UNDERFLOW =>
-                  Stream.chunk(out)
+                  Pull.outputChunk(out)
 
                 case other =>
-                  Stream.fail(new Throwable(s"Unexpected Decoding Result when flushing: $result"))
+                  Pull.raiseError(new Throwable(s"Unexpected Decoding Result when flushing: $result"))
               }}
             }
 
@@ -84,19 +85,19 @@ object charset {
             val (result, outChunk) = impl.decodeBuff(decoder, bb, last = true)
             result match {
               case CoderResult.OVERFLOW =>
-                Stream.fail(new Throwable("Unexpected Decoding Overflow (last)")) // impossible
+                Pull.raiseError(new Throwable("Unexpected Decoding Overflow (last)")) // impossible
 
               case CoderResult.UNDERFLOW =>
-                Stream.chunk(outChunk) ++ flush
+                Pull.outputChunk(outChunk) >> flush
 
               case other =>
-                if (other.isError) Stream.fail(new Throwable(s"Unexpected Result when finalizing decode: $result"))
-                else Stream.chunk(outChunk) ++ flush
+                if (other.isError) Pull.raiseError(new Throwable(s"Unexpected Result when finalizing decode: $result"))
+                else Pull.outputChunk(outChunk) >> flush
             }
         }
       }
 
-      (s.chunks through go(ByteVector.empty)).scope
+      go(ByteVector.empty)(s).stream
     }
   }
 
@@ -108,40 +109,40 @@ object charset {
     * For certaion encoding (i.e. UTF-16) this may present unnecessary characters to eb emitted (magic bytes, headers)
     *
     */
-  def encode[F[_]](chs: Charset)(implicit F: Effect[F]): Pipe[F, Char, Byte] = { s =>
+  def encode[F[_]](chs: Charset)(implicit F: Sync[F]): Pipe[F, Char, Byte] = { s =>
     Stream.eval(F.delay(chs.newEncoder())) flatMap { encoder =>
 
-      def go(buff: String): Pipe[F, Chunk[Char], Byte] = {
-        _.uncons1 flatMap {
+      def go(buff: String)(s: Stream[F, Char]): Pull[F, Byte, Unit] = {
+        s.pull.unconsChunk flatMap {
           case Some((chunk, tail)) =>
             val s = buff + StringChunk.asString(chunk)
             val chb = CharBuffer.wrap(s)
             val (result, outChunk) = impl.encodeBuff(encoder, chb, last = false)
             result match {
               case CoderResult.OVERFLOW =>
-                Stream.fail(new Throwable("Unexpected Encoding Overflow")) // impossible
+                Pull.raiseError(new Throwable("Unexpected Encoding Overflow")) // impossible
 
               case CoderResult.UNDERFLOW =>
                 // we may have still bytes remaining in input buffer, if so, we have to
                 // store these data and use in next invocation
                 val buff0 = chb.toString
-                Stream.chunk(outChunk) ++ go(buff0)(tail)
+                Pull.outputChunk(outChunk) >> go(buff0)(tail)
 
               case other =>
-                Stream.fail(new Throwable(s"Unexpected Result when decodeing: $other"))
+                Pull.raiseError(new Throwable(s"Unexpected Result when decodeing: $other"))
             }
 
           case None =>
-            def flush: Stream[F, Byte] = {
-              Stream.eval(F.delay(impl.encodeFlush(encoder))) flatMap { case (result, out) => result match {
+            def flush: Pull[F, Byte, Unit] = {
+              Pull.eval(F.delay(impl.encodeFlush(encoder))) flatMap { case (result, out) => result match {
                 case CoderResult.OVERFLOW =>
-                  Stream.fail(new Throwable("Unexpected Encoding Overflow (flush)")) // impossible
+                  Pull.raiseError(new Throwable("Unexpected Encoding Overflow (flush)")) // impossible
 
                 case CoderResult.UNDERFLOW =>
-                  Stream.chunk(out)
+                  Pull.outputChunk(out)
 
                 case other =>
-                  Stream.fail(new Throwable(s"Unexpected Encoding Result when flushing: $result"))
+                  Pull.raiseError(new Throwable(s"Unexpected Encoding Result when flushing: $result"))
               }}
             }
 
@@ -149,19 +150,19 @@ object charset {
             val (result, outChunk) = impl.encodeBuff(encoder, chb, last = true)
             result match {
               case CoderResult.OVERFLOW =>
-                Stream.fail(new Throwable("Unexpected Encoding Overflow (last)")) // impossible
+                Pull.raiseError(new Throwable("Unexpected Encoding Overflow (last)")) // impossible
 
               case CoderResult.UNDERFLOW =>
-                Stream.chunk(outChunk) ++ flush
+                Pull.outputChunk(outChunk) >> flush
 
               case other =>
-                if (other.isError) Stream.fail(new Throwable(s"Unexpected Result when finalizing encode: $result"))
-                else Stream.chunk(outChunk) ++ flush
+                if (other.isError) Pull.raiseError(new Throwable(s"Unexpected Result when finalizing encode: $result"))
+                else Pull.outputChunk(outChunk) >> flush
             }
         }
       }
 
-      (s.chunks through go("")).scope
+      go("")(s).stream
     }
   }
 

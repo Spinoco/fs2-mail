@@ -3,10 +3,13 @@ package spinoco.fs2.mail.smtp
 import java.nio.charset.Charset
 import java.time.{ZoneId, ZonedDateTime}
 
+import cats.effect.IO
 import fs2._
 import org.scalacheck.Properties
 import org.scalacheck.Prop._
-import spinoco.fs2.mail.interop.{ByteVectorChunk, StringChunk}
+import scodec.bits.ByteVector
+
+import spinoco.fs2.mail.interop.StringChunk
 import spinoco.protocol.mail.{EmailAddress, EmailHeader}
 import spinoco.protocol.mail.header.codec.EmailHeaderCodec
 import spinoco.protocol.mail.mime.TransferEncoding
@@ -25,11 +28,11 @@ object MIMEEncodePlaintextSpec extends Properties("MIMEEncodePlaintext") {
       |--- end
       |
       """.stripMargin.lines.mkString("\r\n")
-  )).covary[Task]
+  )).covary[IO]
 
   property("defaults") = protect {
 
-    SMTPClient.impl.encodeTextBody[Task](
+    SMTPClient.impl.encodeTextBody[IO](
       header = EmailHeader(
         subject = "Test Email"
         , date = ZonedDateTime.of(2017, 12, 12, 7, 32, 10, 0, ZoneId.of("GMT"))
@@ -40,9 +43,12 @@ object MIMEEncodePlaintextSpec extends Properties("MIMEEncodePlaintext") {
       , emailHeaderCodec = emailCodec
       , mimeHeaderCodec = mimeCodec
     )
-    .chunks.map(ByteVectorChunk.asByteVector)
-    .runLog.map { _.reduce(_ ++ _).decodeUtf8.right.getOrElse("--ERR--") }
-    .unsafeRun() ?=
+    .chunks.map { ch =>
+      val bs = ch.toBytes
+      ByteVector.view(bs.values, bs.offset, bs.size)
+    }
+    .compile.toVector.map { _.reduce(_ ++ _).decodeUtf8.right.getOrElse("--ERR--") }
+    .unsafeRunSync() ?=
       """Subject: Test Email
         |Date: Tue, 12 Dec 2017 07:32:10 +0000
         |From: "John Doe" <john.doe@mail.com>
@@ -65,7 +71,7 @@ object MIMEEncodePlaintextSpec extends Properties("MIMEEncodePlaintext") {
 
   property("specified.content-type") = protect {
 
-    SMTPClient.impl.encodeTextBody[Task](
+    SMTPClient.impl.encodeTextBody[IO](
       header = EmailHeader(
         subject = "Test Email"
         , date = ZonedDateTime.of(2017, 12, 12, 7, 32, 10, 0, ZoneId.of("GMT"))
@@ -76,9 +82,12 @@ object MIMEEncodePlaintextSpec extends Properties("MIMEEncodePlaintext") {
       , emailHeaderCodec = emailCodec
       , mimeHeaderCodec = mimeCodec
     )
-      .chunks.map(ByteVectorChunk.asByteVector)
-      .runLog.map { _.reduce(_ ++ _).decodeUtf8.right.getOrElse("--ERR--") }
-      .unsafeRun() ?=
+      .chunks.map { ch =>
+        val bs = ch.toBytes
+        ByteVector.view(bs.values, bs.offset, bs.size)
+      }
+      .compile.toVector.map { _.reduce(_ ++ _).decodeUtf8.right.getOrElse("--ERR--") }
+      .unsafeRunSync() ?=
       """Subject: Test Email
         |Date: Tue, 12 Dec 2017 07:32:10 +0000
         |From: "John Doe" <john.doe@mail.com>
@@ -99,7 +108,7 @@ object MIMEEncodePlaintextSpec extends Properties("MIMEEncodePlaintext") {
 
   property("specified.transfer-encoding") = protect {
 
-    SMTPClient.impl.encodeTextBody[Task](
+    SMTPClient.impl.encodeTextBody[IO](
       header = EmailHeader(
         subject = "Test Email"
         , date = ZonedDateTime.of(2017, 12, 12, 7, 32, 10, 0, ZoneId.of("GMT"))
@@ -110,9 +119,12 @@ object MIMEEncodePlaintextSpec extends Properties("MIMEEncodePlaintext") {
       , emailHeaderCodec = emailCodec
       , mimeHeaderCodec = mimeCodec
     )
-    .chunks.map(ByteVectorChunk.asByteVector)
-    .runLog.map { _.reduce(_ ++ _).decodeUtf8.right.getOrElse("--ERR--") }
-    .unsafeRun() ?=
+    .chunks.map { ch =>
+      val bs = ch.toBytes
+      ByteVector.view(bs.values, bs.offset, bs.size)
+    }
+    .compile.toVector.map { _.reduce(_ ++ _).decodeUtf8.right.getOrElse("--ERR--") }
+    .unsafeRunSync() ?=
     """Subject: Test Email
       |Date: Tue, 12 Dec 2017 07:32:10 +0000
       |From: "John Doe" <john.doe@mail.com>

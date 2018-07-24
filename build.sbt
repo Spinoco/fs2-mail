@@ -4,7 +4,11 @@ val ReleaseTag = """^release/([\d\.]+a?)$""".r
 
 lazy val contributors = Seq(
   "pchlupacek" -> "Pavel Chlupáček"
+  , "AdamChlupacek" -> "Adam Chlupáček"
+  , "mrauilm" -> "Milan Raulim"
 )
+
+val fs2Version = "0.10.5"
 
 
 lazy val commonSettings = Seq(
@@ -26,9 +30,10 @@ lazy val commonSettings = Seq(
   scalacOptions in (Compile, console) ~= {_.filterNot("-Ywarn-unused-import" == _)},
   scalacOptions in (Test, console) <<= (scalacOptions in (Compile, console)),
   libraryDependencies ++= Seq(
-    "co.fs2" %% "fs2-core" % "0.9.7"
-    , "co.fs2" %% "fs2-io" % "0.9.7"
-    , "com.spinoco" %% "protocol-mail" % "0.3.11"
+    "co.fs2" %% "fs2-core" % fs2Version
+    , "co.fs2" %% "fs2-io" % fs2Version
+    , "co.fs2" %% "fs2-scodec" % fs2Version
+    , "com.spinoco" %% "protocol-mail" % "0.3.15"
     , "com.beetstra.jutf7" % "jutf7" % "1.0.0"
     , "org.scalacheck" %% "scalacheck" % "1.13.4" % "test"
   ),

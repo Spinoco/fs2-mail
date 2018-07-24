@@ -1,15 +1,18 @@
 package spinoco.fs2.mail.smtp
 
+import cats.syntax.all._
+import cats.effect.{Effect, Sync}
 import fs2._
 import fs2.async.mutable.Semaphore
+import fs2.interop.scodec.ByteVectorChunk
 import fs2.io.tcp.Socket
-import fs2.util.{Async, Effect}
-import fs2.util.syntax._
 import scodec.{Attempt, Codec}
 import scodec.bits.ByteVector
 import shapeless.tag.@@
+
+import scala.concurrent.ExecutionContext
+
 import spinoco.fs2.mail.encoding
-import spinoco.fs2.mail.interop.ByteVectorChunk
 import spinoco.fs2.mail.mime.MIMEPart.{MultiPart, SinglePart}
 import spinoco.fs2.mail.mime.SMTPResponse.Code
 import spinoco.fs2.mail.mime.{MIMEPart, SMTPError, SMTPResponse}
@@ -19,7 +22,6 @@ import spinoco.protocol.mail.header._
 import spinoco.protocol.mail.mime.TransferEncoding.StandardEncoding
 import spinoco.protocol.mail.mime.{MIMEHeader, TransferEncoding}
 import spinoco.protocol.mime.{ContentType, MIMECharset, MediaType}
-
 import scala.concurrent.duration.FiniteDuration
 import scala.util.{Failure, Success, Try}
 
@@ -99,15 +101,15 @@ object SMTPClient {
     , sendTimeout: FiniteDuration
     , emailHeaderCodec: Codec[EmailHeader] = EmailHeaderCodec.codec(100 * 1024) // 100K max header size
     , mimeHeaderCodec: Codec[MIMEHeader] = EmailHeaderCodec.mimeCodec(10 * 1024) // 10K for mime shall be enough
-  )(implicit F: Async[F]): Stream[F, SMTPClient[F]] = {
+  )(implicit F: Effect[F], EC: ExecutionContext): Stream[F, SMTPClient[F]] = {
     implicit val socket_ = socket
     Stream.eval(async.semaphore(0)) flatMap { sending =>
-    Stream.eval(F.ref[String]) flatMap { serverIdRef =>
+    Stream.eval(async.promise[F, String]) flatMap { serverIdRef =>
 
       // initialize the SMTP client to await first line (welcome) from the server.
       // also when this terminates the sending semaphore is open.
       def initialize =
-        (impl.initialHandshake(initialHandshakeTimeout) flatMap serverIdRef.setPure) >>
+        (impl.initialHandshake(initialHandshakeTimeout) flatMap serverIdRef.complete) >>
         sending.increment
 
       // sends requests and collects any response
@@ -153,13 +155,13 @@ object SMTPClient {
       */
     def initialHandshake[F[_]](
       timeout: FiniteDuration
-    )(implicit socket: Socket[F], F: Effect[F]): F[String] = {
-      (socket.reads(1024, Some(timeout)) through readResponse).runLog flatMap { resp =>
+    )(implicit socket: Socket[F], F: Sync[F]): F[String] = {
+      (socket.reads(1024, Some(timeout)) through readResponse).compile.toVector flatMap { resp =>
         resp.headOption match {
           case Some(resp@SMTPResponse(code, text)) =>
             if (code == Code.Ready) F.pure(text)
-            else F.fail(new SMTPError(resp))
-          case None => F.fail(new Throwable("Expected at least one response with code 220, got None"))
+            else F.raiseError(new SMTPError(resp))
+          case None => F.raiseError(new Throwable("Expected at least one response with code 220, got None"))
         }
       }
     }
@@ -179,24 +181,26 @@ object SMTPClient {
       *
       */
     def readResponse[F[_]]: Pipe[F, Byte, SMTPResponse] = {
-      def go(buff: ByteVector): Handle[F, Byte] => Pull[F, String, Unit] = {
-        _ receiveOption {
-          case Some((ch, h)) =>
-            val bv = buff ++ ByteVectorChunk.asByteVector(ch)
+      def go(buff: ByteVector)(s: Stream[F, Byte]): Pull[F, String, Unit] = {
+        s.pull.unconsChunk.flatMap {
+          case Some((ch, tl)) =>
+            val bs = ch.toBytes
+            val bv = buff ++ ByteVector.view(bs.values, bs.offset, bs.size)
             val idx = bv.indexOfSlice(crlf)
-            if (idx < 0) go(bv)(h)
+            if (idx < 0) go(bv)(tl)
             else {
               val (line, t) = bv.splitAt(idx)
               line.decodeAscii match {
-                case Right(s) => Pull.output1(s) >> go(ByteVector.empty)(h.push(ByteVectorChunk(t.drop(crlf.size))))
-                case Left(err) => Pull.fail(new Throwable(s"Failed to decode data from server: $bv", err))
+                case Right(s) => Pull.output1(s) >> go(ByteVector.empty)(Stream.chunk(ByteVectorChunk(t.drop(crlf.size))) ++ tl)
+                case Left(err) => Pull.raiseError(new Throwable(s"Failed to decode data from server: $bv", err))
               }
             }
           case None => Pull.done
         }
       }
-      _.pull(go(ByteVector.empty)).flatMap { line =>
-        if (line.length < 4) Stream.fail(new Throwable(s"Failed to process server response, server response must have size of at least 4 characters. got $line"))
+
+      go(ByteVector.empty)(_).stream.flatMap { line =>
+        if (line.length < 4) Stream.raiseError(new Throwable(s"Failed to process server response, server response must have size of at least 4 characters. got $line"))
         else {
           Try(Code(line.take(3).toInt)) match {
             case Success(code) =>
@@ -205,7 +209,7 @@ object SMTPClient {
               else out ++ Stream.emit(None)
 
             case Failure(err) =>
-              Stream.fail(err)
+              Stream.raiseError(err)
 
           }
 
@@ -224,16 +228,16 @@ object SMTPClient {
       * @tparam F
       * @return
       */
-    def sendRequest[F[_]](
+    def sendRequest[F[_] : Sync](
        timeout: FiniteDuration
       , sending: Semaphore[F]
-    )(data: Stream[F, Byte])(implicit socket: Socket[F], F: Effect[F]): F[Seq[SMTPResponse]] = {
+    )(data: Stream[F, Byte])(implicit socket: Socket[F]): F[Seq[SMTPResponse]] = {
       sending.decrement >>
-      ( data.to(socket.writes()).run >>
-        socket.reads(1024, Some(timeout)).through(readResponse).runLog
+      ( data.to(socket.writes()).compile.drain >>
+        socket.reads(1024, Some(timeout)).through(readResponse).compile.toVector
       ).attempt flatMap {
         case Right(rslt) => sending.increment as rslt
-        case Left(err) => sending.increment >> F.fail(err)
+        case Left(err) => sending.increment >> Sync[F].raiseError(err)
       }
     }
 
@@ -260,10 +264,10 @@ object SMTPClient {
       * @param userName Name of the user
       * @param password password
       */
-    def login[F[_]](userName: String, password: String)(implicit send: Stream[F, Byte] => F[Seq[SMTPResponse]], F: Effect[F]): F[Unit] = {
+    def login[F[_] : Sync](userName: String, password: String)(implicit send: Stream[F, Byte] => F[Seq[SMTPResponse]]): F[Unit] = {
 
       def failed(tag: String, resp: Seq[SMTPResponse]): F[Unit] =
-        F.fail(new Throwable(s"Unexpected response during login [$tag]: $resp"))
+        Sync[F].raiseError(new Throwable(s"Unexpected response during login [$tag]: $resp"))
 
       def continues(result: Seq[SMTPResponse]):Boolean =
         result.exists(_.code == Code.Continue)
@@ -274,7 +278,7 @@ object SMTPClient {
           if (! continues(userNameResult)) failed("userName", userNameResult)
           else send(Stream.chunk(ByteVectorChunk(toBase64Line(password)))) flatMap { passwordResult =>
             if (! passwordResult.exists(_.code == Code.AuthAccepted)) failed("password", passwordResult)
-            else F.pure(())
+            else Sync[F].pure(())
           }
         }
       }
@@ -290,31 +294,31 @@ object SMTPClient {
       * @param authenticationId   Authenitcation id
       * @param pass               Password
       */
-    def loginPlain[F[_]](
+    def loginPlain[F[_] : Sync](
       authorizationId: String
       , authenticationId: String
       , pass: String
-    )(implicit send: Stream[F, Byte] => F[Seq[SMTPResponse]], F: Effect[F]): F[Unit] = {
+    )(implicit send: Stream[F, Byte] => F[Seq[SMTPResponse]]): F[Unit] = {
       val encoded = ByteVector.view(authorizationId.getBytes) ++ zero ++
                     ByteVector.view(authenticationId.getBytes) ++ zero ++
                     ByteVector.view(pass.getBytes)
       send(command(s"AUTH LOGIN ${encoded.toBase64}")) flatMap { loginResult =>
-        if (! loginResult.exists(_.code == Code.AuthAccepted)) F.fail(new Throwable(s"Unexpected response during plain login: $loginResult"))
-        else F.pure(())
+        if (! loginResult.exists(_.code == Code.AuthAccepted)) Sync[F].raiseError(new Throwable(s"Unexpected response during plain login: $loginResult"))
+        else Sync[F].pure(())
       }
     }
 
 
     /** logins via cram-md5 **/
-    def loginCramMD5[F[_]](userName: String, password: String)(implicit send: Stream[F, Byte] => F[Seq[SMTPResponse]], F: Effect[F]): F[Unit] = {
+    def loginCramMD5[F[_] : Sync](userName: String, password: String)(implicit send: Stream[F, Byte] => F[Seq[SMTPResponse]]): F[Unit] = {
       send(command(s"AUTH CRAM-MD5")) flatMap { loginResult =>
         loginResult.find(_.code == Code.Continue) match {
-          case None => F.fail(new Throwable(s"Unexpected response during cram-md5 [nonce]: $loginResult"))
+          case None => Sync[F].raiseError(new Throwable(s"Unexpected response during cram-md5 [nonce]: $loginResult"))
           case Some(resp) => computeCramMD5(resp.data, password) match {
-            case None => F.fail(new Throwable(s"Failed to compute cram-md5 data invalid nonce? : $resp"))
+            case None => Sync[F].raiseError(new Throwable(s"Failed to compute cram-md5 data invalid nonce? : $resp"))
             case Some(cramComputed) => send(command(ByteVector.view(s"$userName ${cramComputed.toHex}".getBytes).toBase64)) flatMap { authResult =>
-              if (!authResult.exists(_.code == Code.AuthAccepted)) F.fail(new Throwable(s"Unexpected response during cram-md5 [auth]: $authResult"))
-              else F.pure(())
+              if (!authResult.exists(_.code == Code.AuthAccepted)) Sync[F].raiseError(new Throwable(s"Unexpected response during cram-md5 [auth]: $authResult"))
+              else Sync[F].pure(())
             }
           }
         }
@@ -353,10 +357,10 @@ object SMTPClient {
       command(s"RCPT TO:${wrapMail(email)}")
 
     /** signal tx failed **/
-    def txFail[F[_]](result: Seq[SMTPResponse])(implicit F: Effect[F]): F[Option[SMTPError]] = {
+    def txFail[F[_]](result: Seq[SMTPResponse])(implicit F: Sync[F]): F[Option[SMTPError]] = {
       result.headOption match {
         case Some(resp) => F.pure(Some(SMTPError(resp)))
-        case None =>   F.fail(new Throwable("No response received"))
+        case None =>   F.raiseError(new Throwable("No response received"))
       }
     }
 
@@ -371,30 +375,31 @@ object SMTPClient {
       * This facilites that requirement.
       */
     def insertDotIfNeeded[F[_]]: Pipe[F, Byte, Byte] = {
-      def go(buff: ByteVector): Handle[F, Byte] => Pull[F, Byte, Unit] = {
-        _.receiveOption {
-          case Some((ch, h)) =>
-            val bv = buff ++ ByteVectorChunk.asByteVector(ch)
+      def go(buff: ByteVector)(s: Stream[F, Byte]): Pull[F, Byte, Unit] = {
+        s.pull.unconsChunk.flatMap {
+          case Some((ch, tl)) =>
+            val bs = ch.toBytes
+            val bv = buff ++ ByteVector.view(bs.values, bs.offset, bs.size)
             val idx = bv.indexOfSlice(dotLine)
             if (idx < 0) {
               if (bv.size < 2) {
-                if (bv == cr) go(cr)(h)
-                else Pull.output(ByteVectorChunk(bv)) >> go(ByteVector.empty)(h)
+                if (bv == cr) go(cr)(tl)
+                else Pull.outputChunk(ByteVectorChunk(bv)) >> go(ByteVector.empty)(tl)
               } else {
                 val tail = bv.takeRight(2)
-                if (tail == crlf) Pull.output(ByteVectorChunk(bv.take(bv.size - 2))) >> go(crlf)(h)
-                else if (tail.drop(1) == cr) Pull.output(ByteVectorChunk(bv.take(bv.size -1))) >> go(cr)(h)
-                else Pull.output(ByteVectorChunk(bv)) >> go(ByteVector.empty)(h)
+                if (tail == crlf) Pull.outputChunk(ByteVectorChunk(bv.take(bv.size - 2))) >> go(crlf)(tl)
+                else if (tail.drop(1) == cr) Pull.outputChunk(ByteVectorChunk(bv.take(bv.size -1))) >> go(cr)(tl)
+                else Pull.outputChunk(ByteVectorChunk(bv)) >> go(ByteVector.empty)(tl)
               }
             } else {
               val (head, t) = bv.splitAt(idx)
-              Pull.output(ByteVectorChunk(head ++ dotDotLine)) >> go(ByteVector.empty)(h.push(ByteVectorChunk(t.drop(dotLine.size))))
+              Pull.outputChunk(ByteVectorChunk(head ++ dotDotLine)) >> go(ByteVector.empty)(Stream.chunk(ByteVectorChunk(t.drop(dotLine.size))) ++ tl)
             }
 
-          case None => Pull.output(ByteVectorChunk(buff))
+          case None => Pull.outputChunk(ByteVectorChunk(buff))
         }
       }
-      _.pull(go(ByteVector.empty))
+      go(ByteVector.empty)(_).stream
     }
 
     // end of email content streaming
@@ -409,25 +414,24 @@ object SMTPClient {
       * @tparam F
       * @return
       */
-    def sendMail[F[_]](
+    def sendMail[F[_] : Sync](
       from: String @@ EmailAddress
       , recipients: Seq[String @@ EmailAddress]
       , content: Stream[F, Byte]
     )(implicit
       send: Stream[F, Byte] => F[Seq[SMTPResponse]]
-      , F: Effect[F]
     ) : F[Option[SMTPError]] = {
       send(mailFrom(from)).flatMap { fromResult =>
         if (! fromResult.exists(_.code == Code.Completed)) txFail(fromResult)
         else sendToAddresses(recipients).flatMap {
-          case err @ Some(_) => F.pure(err)
+          case err @ Some(_) => Sync[F].pure(err)
           case None =>
             send(command("DATA")).flatMap { dataResult =>
               if(! dataResult.exists(_.code == Code.StartMail)) txFail(dataResult)
               else {
                 send(content.through(insertDotIfNeeded) ++ Stream.chunk(EndOfContent)) flatMap { result =>
                   if (! result.exists(_.code == Code.Completed)) txFail(result)
-                  else F.pure(None)
+                  else Sync[F].pure(None)
                 }
               }
           }
@@ -440,14 +444,13 @@ object SMTPClient {
       *
       * @param recipients The addresses that should recieve the email.
       */
-    def sendToAddresses[F[_]](
+    def sendToAddresses[F[_] : Sync](
       recipients: Seq[String @@ EmailAddress]
     )(implicit
       send: Stream[F, Byte] => F[Seq[SMTPResponse]]
-      , F: Effect[F]
     ): F[Option[SMTPError]] = {
       recipients.headOption match {
-        case None => F.pure(None)
+        case None => Sync[F].pure(None)
         case Some(address) =>
           send(rcptTo(address)).flatMap{ rcptResult =>
             if (! rcptResult.exists(_.code == Code.Completed)) txFail(rcptResult)
@@ -482,7 +485,7 @@ object SMTPClient {
             Stream.chunk(ByteVectorChunk(bits.bytes))
 
           case Attempt.Failure(err) =>
-            Stream.fail(new Throwable(s"Failed to encode [$label]: $err ($a)"))
+            Stream.raiseError(new Throwable(s"Failed to encode [$label]: $err ($a)"))
         }
       }
 
@@ -540,7 +543,7 @@ object SMTPClient {
       * @param emailHeaderCodec     codec to encode email header
       * @param mimeHeaderCodec      codec to encode mime header
       */
-    def encodeTextBody[F[_]: Effect](
+    def encodeTextBody[F[_] : Sync](
       header: EmailHeader
       , text: Stream[F, Char]
       , emailHeaderCodec: Codec[EmailHeader]
@@ -570,7 +573,7 @@ object SMTPClient {
           encodeMimeBody(header, mime, emailHeaderCodec, mimeHeaderCodec)
 
         case Attempt.Failure(err) =>
-          Stream.fail(new Throwable(s"Invalid charset requested: $mimeCharset : $err"))
+          Stream.raiseError(new Throwable(s"Invalid charset requested: $mimeCharset : $err"))
       }
     }
 

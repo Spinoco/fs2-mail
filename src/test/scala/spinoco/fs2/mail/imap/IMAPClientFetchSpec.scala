@@ -1,14 +1,16 @@
 package spinoco.fs2.mail.imap
 
+import cats.effect.IO
 import org.scalacheck._
 import org.scalacheck.Prop._
 import fs2._
 import scodec.bits.ByteVector
+
 import spinoco.fs2.mail.interop.StringChunk
 import shapeless.tag
 import shapeless.tag.@@
+
 import spinoco.fs2.mail.imap.IMAPClient.impl.{IMAPBytes, IMAPText}
-import spinoco.fs2.mail.interop.ByteVectorChunk
 import spinoco.protocol.mail.header.codec.EmailHeaderCodec
 
 object IMAPClientFetchSpec extends Properties("IMAPClient.Fetch"){
@@ -274,8 +276,8 @@ object IMAPClientFetchSpec extends Properties("IMAPClient.Fetch"){
 
 
   def parseFetchResponse(resp: String, chunkSz: Int): Vector[Either[String, Long]] = {
-    Stream.chunk(Chunk.bytes(resp.getBytes)).covary[Task]
-    .chunkLimit(chunkSz).flatMap(Stream.chunk)
+    Stream.chunk(Chunk.bytes(resp.getBytes)).covary[IO]
+    .chunkLimit(chunkSz).flatMap { ch => Stream.chunk(ch) }
     .through(IMAPClient.impl.lines)
     .mapAccumulate(None: Option[Long]) { case (bytesSz, next) => next match {
       case IMAPText(s) =>
@@ -285,7 +287,7 @@ object IMAPClientFetchSpec extends Properties("IMAPClient.Fetch"){
         (sz,  Stream.empty)
     }}
     .flatMap(_._2)
-    .runLog.unsafeRun()
+    .compile.toVector.unsafeRunSync()
   }
 
   property("decode-fetch-header-result") = forAll(Gen.choose(1, headerSingleResponse.size)) { sz =>
@@ -318,9 +320,9 @@ object IMAPClientFetchSpec extends Properties("IMAPClient.Fetch"){
 
 
   def parseFetchRawResponse(resp: String, chunkSz: Int): Vector[(Int, String, Either[String, Long])] = {
-    IMAPClient.impl.rawContent[Task](Stream(Right(
-      Stream.chunk(Chunk.bytes(resp.getBytes)).covary[Task]
-      .chunkLimit(chunkSz).flatMap(Stream.chunk)
+    IMAPClient.impl.rawContent[IO](Stream(Right(
+      Stream.chunk(Chunk.bytes(resp.getBytes)).covary[IO]
+      .chunkLimit(chunkSz).flatMap(ch => Stream.chunk(ch))
       .through(IMAPClient.impl.lines)
     )))
     .noneTerminate
@@ -339,7 +341,7 @@ object IMAPClientFetchSpec extends Properties("IMAPClient.Fetch"){
 
     }
     .flatMap(_._2)
-    .runLog.unsafeRun()
+      .compile.toVector.unsafeRunSync()
   }
 
 
@@ -364,14 +366,14 @@ object IMAPClientFetchSpec extends Properties("IMAPClient.Fetch"){
 
 
   def parseFetchEmailHeader(resp: String, chunkSz: Int): Vector[(Long @@ MailUID, Int)] = {
-    IMAPClient.impl.rawContent[Task](Stream(Right(
-      Stream.chunk(Chunk.bytes(resp.getBytes)).covary[Task]
-      .chunkLimit(chunkSz).flatMap(Stream.chunk)
+    IMAPClient.impl.rawContent[IO](Stream(Right(
+      Stream.chunk(Chunk.bytes(resp.getBytes)).covary[IO]
+      .chunkLimit(chunkSz).flatMap(ch => Stream.chunk(ch))
       .through(IMAPClient.impl.lines)
     )))
     .through(IMAPClient.impl.fetchLog)
     .through(IMAPClient.impl.mkEmailHeader(EmailHeaderCodec.codec(100 * 1024)))
-    .runLog.unsafeRun().map { h =>
+    .compile.toVector.unsafeRunSync().map { h =>
       (h.uid, h.header.fields.size)
     }
   }
@@ -410,15 +412,18 @@ object IMAPClientFetchSpec extends Properties("IMAPClient.Fetch"){
     """.stripMargin).get
 
   def decodeFetchBytes(content: String, chunkSz: Int, key: String = "BODY[2]", encoding: String = "BASE64"): ByteVector = {
-    IMAPClient.impl.rawContent[Task](Stream(Right(
-      Stream.chunk(Chunk.bytes(content.getBytes)).covary[Task]
-        .chunkLimit(chunkSz).flatMap(Stream.chunk)
+    IMAPClient.impl.rawContent[IO](Stream(Right(
+      Stream.chunk(Chunk.bytes(content.getBytes)).covary[IO]
+        .chunkLimit(chunkSz).flatMap(ch => Stream.chunk(ch))
         .through(IMAPClient.impl.lines)
     )))
     .through(IMAPClient.impl.fetchBytesOf(0, key, encoding))
-    .chunks.map(ByteVectorChunk.asByteVector)
-    .runLog.map(_.reduceOption(_ ++ _).getOrElse(ByteVector.empty))
-    .unsafeRun
+    .chunks.map { ch =>
+      val bs = ch.toBytes
+      ByteVector.view(bs.values, bs.offset, bs.size)
+    }
+    .compile.toVector.map(_.reduceOption(_ ++ _).getOrElse(ByteVector.empty))
+    .unsafeRunSync
   }
 
 
@@ -428,15 +433,15 @@ object IMAPClientFetchSpec extends Properties("IMAPClient.Fetch"){
 
 
   def decodeFetchText(content: String, chunkSz: Int, key: String = "BODY[1]", encoding: String = "BASE64", charset: Option[String] = Some("UTF-8")): String = {
-    IMAPClient.impl.rawContent[Task](Stream(Right(
-      Stream.chunk(Chunk.bytes(content.getBytes)).covary[Task]
-        .chunkLimit(chunkSz).flatMap(Stream.chunk)
+    IMAPClient.impl.rawContent[IO](Stream(Right(
+      Stream.chunk(Chunk.bytes(content.getBytes)).covary[IO]
+        .chunkLimit(chunkSz).flatMap(ch => Stream.chunk(ch))
         .through(IMAPClient.impl.lines)
     )))
     .through(IMAPClient.impl.fetchTextOf(0, key, encoding, charset))
     .chunks.map(StringChunk.asString)
-    .runLog.map(_.reduceOption(_ ++ _).getOrElse(""))
-    .unsafeRun
+    .compile.toVector.map(_.reduceOption(_ ++ _).getOrElse(""))
+    .unsafeRunSync()
   }
 
   val bodyText7BitResponse =

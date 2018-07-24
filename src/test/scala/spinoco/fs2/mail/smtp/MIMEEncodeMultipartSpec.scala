@@ -2,11 +2,14 @@ package spinoco.fs2.mail.smtp
 
 import java.time.{ZoneId, ZonedDateTime}
 
-import fs2.{Stream, Task}
+import cats.effect.IO
+import fs2._
+import fs2.interop.scodec.ByteVectorChunk
 import org.scalacheck.Properties
 import org.scalacheck.Prop._
 import scodec.bits.ByteVector
-import spinoco.fs2.mail.interop.{ByteVectorChunk, StringChunk}
+
+import spinoco.fs2.mail.interop.StringChunk
 import spinoco.fs2.mail.mime.MIMEPart
 import spinoco.protocol.mail.{EmailAddress, EmailHeader}
 import spinoco.protocol.mail.header.codec.EmailHeaderCodec
@@ -51,16 +54,19 @@ object MIMEEncodeMultipartSpec extends Properties("MIMEEncodeMultipart") {
         , to = EmailAddress("phil.doe", "mail.com", Some("Phil Doe"))
       )
       , body = MIMEPart.alternative(
-        MIMEPart.html[Task](htmlText)
-        , MIMEPart.plain[Task](plaintext)
+        MIMEPart.html[IO](htmlText)
+        , MIMEPart.plain[IO](plaintext)
         , boundary = "----boundary---"
       )
       , emailHeaderCodec = emailCodec
       , mimeHeaderCodec = mimeCodec
     )
-    .chunks.map(ByteVectorChunk.asByteVector)
-    .runLog.map { _.reduce(_ ++ _).decodeUtf8.right.getOrElse("--ERR--") }
-    .unsafeRun() ?=
+    .chunks.map { ch =>
+      val bs = ch.toBytes
+      ByteVector.view(bs.values, bs.offset, bs.size)
+    }
+    .compile.toVector.map { _.reduce(_ ++ _).decodeUtf8.right.getOrElse("--ERR--") }
+    .unsafeRunSync() ?=
     """Subject: Test Email
       |Date: Tue, 12 Dec 2017 07:32:10 +0000
       |From: "John Doe" <john.doe@mail.com>
@@ -107,16 +113,16 @@ object MIMEEncodeMultipartSpec extends Properties("MIMEEncodeMultipart") {
           , from = EmailAddress("john.doe", "mail.com", Some("John Doe"))
           , to = EmailAddress("phil.doe", "mail.com", Some("Phil Doe"))
         )
-        , body = MIMEPart.multipart(
+        , body = MIMEPart.multipart[IO](
           subtype = "mixed"
           , parts = Stream.emit(
             MIMEPart.alternative(
-              MIMEPart.html[Task](htmlText)
-              , MIMEPart.plain[Task](plaintext)
+              MIMEPart.html[IO](htmlText)
+              , MIMEPart.plain[IO](plaintext)
               , boundary = "----alt-boundary---"
             )
           ) ++ Stream.emit(
-            MIMEPart.file[Task](
+            MIMEPart.file[IO](
               "jpeg-picture"
               , "awesome.jpeg"
               , MediaType.`image/jpeg`
@@ -128,9 +134,12 @@ object MIMEEncodeMultipartSpec extends Properties("MIMEEncodeMultipart") {
         , emailHeaderCodec = emailCodec
         , mimeHeaderCodec = mimeCodec
       )
-      .chunks.map(ByteVectorChunk.asByteVector)
-      .runLog.map { _.reduce(_ ++ _).decodeUtf8.right.getOrElse("--ERR--") }
-      .unsafeRun() ?=
+      .chunks.map { ch =>
+        val bs = ch.toBytes
+        ByteVector.view(bs.values, bs.offset, bs.size)
+      }
+      .compile.toVector.map { _.reduce(_ ++ _).decodeUtf8.right.getOrElse("--ERR--") }
+      .unsafeRunSync() ?=
       """Subject: Test Email
         |Date: Tue, 12 Dec 2017 07:32:10 +0000
         |From: "John Doe" <john.doe@mail.com>
