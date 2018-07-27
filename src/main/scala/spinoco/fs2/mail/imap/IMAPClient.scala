@@ -171,7 +171,7 @@ object IMAPClient {
             shortContent(request(LoginPlainText(userName, password)))(parseLogin[F])
 
           def logout =
-            shortContent(request(Logout)) { _ => Concurrent[F].pure(()) } as (())
+            shortContent(request(Logout)) { _ => Applicative[F].pure(()) } as (())
 
           def capability =
             shortContent(request(Capability))(parseCapability[F])
@@ -180,7 +180,7 @@ object IMAPClient {
             shortContent(request(Select(mailbox)))(parseSelect[F])
 
           def examine(mailbox: @@[String, MailboxName]) =
-            Concurrent[F].delay(println(s"Examine $mailbox")) >>
+            Sync[F].delay(println(s"Examine $mailbox")) >>
             shortContent(request(Examine(mailbox)))(parseSelect[F])
 
           def list(reference: String, wildcardName: String): F[IMAPResult[Seq[IMAPMailbox]]] =

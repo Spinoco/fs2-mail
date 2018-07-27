@@ -1,5 +1,6 @@
 package spinoco.fs2.mail
 
+import cats.Applicative
 import cats.effect.Concurrent
 import cats.effect.concurrent.Ref
 import cats.syntax.all._
@@ -40,7 +41,7 @@ package object internal {
           dequeue
         ).onFinalize{
           finishedRef.get.flatMap{
-            case true => Concurrent[F].unit
+            case true => Applicative[F].unit
             case false => dequeue.compile.drain
           }
         }
