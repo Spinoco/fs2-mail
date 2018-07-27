@@ -19,7 +19,7 @@ object base64 {
       s.pull.unconsChunk.flatMap {
         case None =>
           if (rem.size == 0) Pull.done
-          else Pull.outputChunk(ByteVectorChunk(ByteVector.view(rem.toBase64(alphabet).getBytes)))
+          else Pull.output(ByteVectorChunk(ByteVector.view(rem.toBase64(alphabet).getBytes)))
 
         case Some((chunk, h)) =>
           val bs = chunk.toBytes
@@ -34,7 +34,7 @@ object base64 {
               out(pos) = alphabet.toChar(idx).toByte
               pos = pos + 1
             }
-            Pull.outputChunk(ByteVectorChunk(ByteVector.view(out))) >> go(n.takeRight(pad))(h)
+            Pull.output(ByteVectorChunk(ByteVector.view(out))) >> go(n.takeRight(pad))(h)
           } else {
             go(n)(h)
           }
@@ -88,8 +88,8 @@ object base64 {
             if (aligned <= 0 && !term) go(acc)(tl)
             else {
               val (out, rem) = acc.splitAt(aligned)
-              if (term) Pull.outputChunk(ByteVectorChunk(out.toByteVector))
-              else Pull.outputChunk(ByteVectorChunk(out.toByteVector)) >> go(rem)(tl)
+              if (term) Pull.output(ByteVectorChunk(out.toByteVector))
+              else Pull.output(ByteVectorChunk(out.toByteVector)) >> go(rem)(tl)
             }
 
           } catch {

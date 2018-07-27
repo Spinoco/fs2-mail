@@ -2,7 +2,7 @@ package spinoco.fs2.mail.interop
 
 import fs2.Chunk
 
-final class StringChunk(val stringValue: String) extends Chunk[Char] {
+final class StringChunk(val stringValue: String) extends Chunk[Char] { self =>
   def size: Int = stringValue.size
 
   def apply(i: Int): Char = stringValue(i)
@@ -12,6 +12,9 @@ final class StringChunk(val stringValue: String) extends Chunk[Char] {
     (StringChunk(h), StringChunk(t))
   }
 
+  def copyToArray[O2 >: Char](xs: Array[O2], start: Int): Unit = {
+    stringValue.iterator.copyToArray(xs, start)
+  }
 }
 
 

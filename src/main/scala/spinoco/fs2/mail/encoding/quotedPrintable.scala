@@ -53,7 +53,7 @@ object quotedPrintable {
           val bv = buff ++ ByteVector.view(bs.values, bs.offset, bs.size)
           decodeBV(bv, ByteVector.empty) match {
             case Right((decoded, remainder)) =>
-              Pull.outputChunk(ByteVectorChunk(decoded)) >> go(remainder)(tl)
+              Pull.output(ByteVectorChunk(decoded)) >> go(remainder)(tl)
 
             case Left(err) =>
               Pull.raiseError(new Throwable(s"Failed to decode from quotedPrintable: $err (${bv.decodeUtf8})"))

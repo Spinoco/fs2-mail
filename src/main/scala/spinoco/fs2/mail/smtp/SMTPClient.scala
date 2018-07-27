@@ -1,27 +1,25 @@
 package spinoco.fs2.mail.smtp
 
+import cats.effect.concurrent.{Deferred, Semaphore}
+import cats.effect.{Concurrent, Sync}
 import cats.syntax.all._
-import cats.effect.{Effect, Sync}
 import fs2._
-import fs2.async.mutable.Semaphore
 import fs2.interop.scodec.ByteVectorChunk
 import fs2.io.tcp.Socket
-import scodec.{Attempt, Codec}
 import scodec.bits.ByteVector
+import scodec.{Attempt, Codec}
 import shapeless.tag.@@
-
-import scala.concurrent.ExecutionContext
-
 import spinoco.fs2.mail.encoding
 import spinoco.fs2.mail.mime.MIMEPart.{MultiPart, SinglePart}
 import spinoco.fs2.mail.mime.SMTPResponse.Code
 import spinoco.fs2.mail.mime.{MIMEPart, SMTPError, SMTPResponse}
-import spinoco.protocol.mail.header.codec.EmailHeaderCodec
-import spinoco.protocol.mail.{EmailAddress, EmailHeader}
 import spinoco.protocol.mail.header._
+import spinoco.protocol.mail.header.codec.EmailHeaderCodec
 import spinoco.protocol.mail.mime.TransferEncoding.StandardEncoding
 import spinoco.protocol.mail.mime.{MIMEHeader, TransferEncoding}
+import spinoco.protocol.mail.{EmailAddress, EmailHeader}
 import spinoco.protocol.mime.{ContentType, MIMECharset, MediaType}
+
 import scala.concurrent.duration.FiniteDuration
 import scala.util.{Failure, Success, Try}
 
@@ -95,22 +93,22 @@ object SMTPClient {
     * send its welcome message (i.e. 220 foo.com, SMTP server Ready)
     * @param socket   Socket to use fro SMTP Connection to server
     */
-  def mk[F[_]](
+  def mk[F[_]: Concurrent](
     socket: Socket[F]
     , initialHandshakeTimeout: FiniteDuration
     , sendTimeout: FiniteDuration
     , emailHeaderCodec: Codec[EmailHeader] = EmailHeaderCodec.codec(100 * 1024) // 100K max header size
     , mimeHeaderCodec: Codec[MIMEHeader] = EmailHeaderCodec.mimeCodec(10 * 1024) // 10K for mime shall be enough
-  )(implicit F: Effect[F], EC: ExecutionContext): Stream[F, SMTPClient[F]] = {
+  ): Stream[F, SMTPClient[F]] = {
     implicit val socket_ = socket
-    Stream.eval(async.semaphore(0)) flatMap { sending =>
-    Stream.eval(async.promise[F, String]) flatMap { serverIdRef =>
+    Stream.eval(Semaphore[F](0)) flatMap { sending =>
+    Stream.eval(Deferred[F, String]) flatMap { serverIdRef =>
 
       // initialize the SMTP client to await first line (welcome) from the server.
       // also when this terminates the sending semaphore is open.
       def initialize =
         (impl.initialHandshake(initialHandshakeTimeout) flatMap serverIdRef.complete) >>
-        sending.increment
+        sending.acquire
 
       // sends requests and collects any response
       implicit val sendRequest = impl.sendRequest(sendTimeout, sending) _
@@ -232,12 +230,12 @@ object SMTPClient {
        timeout: FiniteDuration
       , sending: Semaphore[F]
     )(data: Stream[F, Byte])(implicit socket: Socket[F]): F[Seq[SMTPResponse]] = {
-      sending.decrement >>
+      sending.acquire >>
       ( data.to(socket.writes()).compile.drain >>
         socket.reads(1024, Some(timeout)).through(readResponse).compile.toVector
       ).attempt flatMap {
-        case Right(rslt) => sending.increment as rslt
-        case Left(err) => sending.increment >> Sync[F].raiseError(err)
+        case Right(rslt) => sending.release as rslt
+        case Left(err) => sending.release >> Sync[F].raiseError(err)
       }
     }
 
@@ -384,19 +382,19 @@ object SMTPClient {
             if (idx < 0) {
               if (bv.size < 2) {
                 if (bv == cr) go(cr)(tl)
-                else Pull.outputChunk(ByteVectorChunk(bv)) >> go(ByteVector.empty)(tl)
+                else Pull.output(ByteVectorChunk(bv)) >> go(ByteVector.empty)(tl)
               } else {
                 val tail = bv.takeRight(2)
-                if (tail == crlf) Pull.outputChunk(ByteVectorChunk(bv.take(bv.size - 2))) >> go(crlf)(tl)
-                else if (tail.drop(1) == cr) Pull.outputChunk(ByteVectorChunk(bv.take(bv.size -1))) >> go(cr)(tl)
-                else Pull.outputChunk(ByteVectorChunk(bv)) >> go(ByteVector.empty)(tl)
+                if (tail == crlf) Pull.output(ByteVectorChunk(bv.take(bv.size - 2))) >> go(crlf)(tl)
+                else if (tail.drop(1) == cr) Pull.output(ByteVectorChunk(bv.take(bv.size -1))) >> go(cr)(tl)
+                else Pull.output(ByteVectorChunk(bv)) >> go(ByteVector.empty)(tl)
               }
             } else {
               val (head, t) = bv.splitAt(idx)
-              Pull.outputChunk(ByteVectorChunk(head ++ dotDotLine)) >> go(ByteVector.empty)(Stream.chunk(ByteVectorChunk(t.drop(dotLine.size))) ++ tl)
+              Pull.output(ByteVectorChunk(head ++ dotDotLine)) >> go(ByteVector.empty)(Stream.chunk(ByteVectorChunk(t.drop(dotLine.size))) ++ tl)
             }
 
-          case None => Pull.outputChunk(ByteVectorChunk(buff))
+          case None => Pull.output(ByteVectorChunk(buff))
         }
       }
       go(ByteVector.empty)(_).stream

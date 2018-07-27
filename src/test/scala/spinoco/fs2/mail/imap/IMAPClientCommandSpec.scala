@@ -1,11 +1,11 @@
 package spinoco.fs2.mail.imap
 
 import cats.effect.IO
+import cats.effect.concurrent.{Ref, Semaphore}
 import fs2._
 import cats.syntax.all._
 import org.scalacheck.Properties
 import org.scalacheck.Prop._
-
 import spinoco.fs2.mail.imap.IMAPClient.impl.{IMAPData, IMAPText}
 
 object IMAPClientCommandSpec extends Properties("IMAPClient.request") {
@@ -24,11 +24,11 @@ object IMAPClientCommandSpec extends Properties("IMAPClient.request") {
 
   property("cmd.release.after.drain") = protect{
     val (drained, result) =
-      async.refOf[IO, Long](1l).flatMap { idxRef =>
-      async.refOf[IO, Boolean](false).flatMap{ drainedRef =>
-      fs2.async.semaphore[IO](1).flatMap{ gate =>
+      Ref.of[IO, Long](1l).flatMap { idxRef =>
+      Ref.of[IO, Boolean](false).flatMap{ drainedRef =>
+      Semaphore[IO](1).flatMap{ gate =>
 
-        val tagged = createTagged(gate.available.map(_ == 0).map(!_), 3, drainedRef.setSync(true))
+        val tagged = createTagged(gate.available.map(_ == 0).map(!_), 3, drainedRef.set(true))
 
         IMAPClient.impl.requestCmd[IO](idxRef, gate, tagged, _ => IO.unit)(IMAPCommand.Logout).flatMap{
           case Left(_) => Stream.empty

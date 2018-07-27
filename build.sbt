@@ -8,8 +8,7 @@ lazy val contributors = Seq(
   , "mrauilm" -> "Milan Raulim"
 )
 
-val fs2Version = "0.10.5"
-
+val fs2Version = "1.0.0-M2"
 
 lazy val commonSettings = Seq(
   organization := "com.spinoco",
@@ -28,7 +27,7 @@ lazy val commonSettings = Seq(
     "-Ywarn-unused-import"
   ),
   scalacOptions in (Compile, console) ~= {_.filterNot("-Ywarn-unused-import" == _)},
-  scalacOptions in (Test, console) <<= (scalacOptions in (Compile, console)),
+  scalacOptions in (Test, console) := (scalacOptions in (Compile, console)).value,
   libraryDependencies ++= Seq(
     "co.fs2" %% "fs2-core" % fs2Version
     , "co.fs2" %% "fs2-io" % fs2Version
