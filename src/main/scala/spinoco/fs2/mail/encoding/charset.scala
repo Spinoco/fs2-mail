@@ -1,14 +1,14 @@
 package spinoco.fs2.mail.encoding
 
-import java.nio.{ByteBuffer, CharBuffer}
 import java.nio.charset._
+import java.nio.{ByteBuffer, CharBuffer}
 
 import cats.effect.Sync
-import fs2.interop.scodec.ByteVectorChunk
+import fs2.Chunk.ByteVectorChunk
 import fs2._
 import scodec.bits.ByteVector
-
 import spinoco.fs2.mail.interop.StringChunk
+
 import scala.annotation.tailrec
 
 object charset {

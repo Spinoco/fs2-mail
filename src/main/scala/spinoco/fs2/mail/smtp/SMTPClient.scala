@@ -3,8 +3,8 @@ package spinoco.fs2.mail.smtp
 import cats.effect.concurrent.{Deferred, Semaphore}
 import cats.effect.{Concurrent, Sync}
 import cats.syntax.all._
+import fs2.Chunk.ByteVectorChunk
 import fs2._
-import fs2.interop.scodec.ByteVectorChunk
 import fs2.io.tcp.Socket
 import scodec.bits.ByteVector
 import scodec.{Attempt, Codec}

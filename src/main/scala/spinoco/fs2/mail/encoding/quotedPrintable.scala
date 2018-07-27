@@ -1,7 +1,7 @@
 package spinoco.fs2.mail.encoding
 
+import fs2.Chunk.ByteVectorChunk
 import fs2._
-import fs2.interop.scodec.ByteVectorChunk
 import scodec.bits.Bases.Alphabets.HexUppercase
 import scodec.bits.ByteVector
 

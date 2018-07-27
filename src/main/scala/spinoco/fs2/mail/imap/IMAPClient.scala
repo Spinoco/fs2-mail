@@ -6,8 +6,8 @@ import cats.Applicative
 import cats.effect.concurrent.{Ref, Semaphore}
 import cats.effect.{Concurrent, Sync}
 import cats.syntax.all._
+import fs2.Chunk.ByteVectorChunk
 import fs2._
-import fs2.interop.scodec.ByteVectorChunk
 import fs2.io.tcp.Socket
 import scodec.bits.{BitVector, ByteVector}
 import scodec.{Attempt, Codec}

@@ -3,10 +3,10 @@ package spinoco.fs2.mail.encoding
 import java.nio.charset.{Charset, StandardCharsets}
 
 import cats.effect.IO
+import fs2.Chunk.ByteVectorChunk
 import fs2._
-import fs2.interop.scodec.ByteVectorChunk
-import org.scalacheck.{Gen, Properties}
 import org.scalacheck.Prop._
+import org.scalacheck.{Gen, Properties}
 import scodec.bits.ByteVector
 
 

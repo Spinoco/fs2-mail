@@ -1,12 +1,11 @@
 package spinoco.fs2.mail.smtp
 
 import cats.effect.IO
+import fs2.Chunk.ByteVectorChunk
 import fs2._
-import fs2.interop.scodec.ByteVectorChunk
-import org.scalacheck._
 import org.scalacheck.Prop._
+import org.scalacheck._
 import scodec.bits.ByteVector
-
 import spinoco.fs2.mail.mime.SMTPResponse
 import spinoco.fs2.mail.mime.SMTPResponse.Code
 
