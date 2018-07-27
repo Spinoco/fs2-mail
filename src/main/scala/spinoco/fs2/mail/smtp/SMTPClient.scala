@@ -108,7 +108,7 @@ object SMTPClient {
       // also when this terminates the sending semaphore is open.
       def initialize =
         (impl.initialHandshake(initialHandshakeTimeout) flatMap serverIdRef.complete) >>
-        sending.acquire
+        sending.release
 
       // sends requests and collects any response
       implicit val sendRequest = impl.sendRequest(sendTimeout, sending) _
