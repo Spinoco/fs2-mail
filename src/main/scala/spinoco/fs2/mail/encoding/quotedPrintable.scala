@@ -1,7 +1,7 @@
 package spinoco.fs2.mail.encoding
 
+import fs2.Chunk.ByteVectorChunk
 import fs2._
-import fs2.interop.scodec.ByteVectorChunk
 import scodec.bits.Bases.Alphabets.HexUppercase
 import scodec.bits.ByteVector
 
@@ -53,7 +53,7 @@ object quotedPrintable {
           val bv = buff ++ ByteVector.view(bs.values, bs.offset, bs.size)
           decodeBV(bv, ByteVector.empty) match {
             case Right((decoded, remainder)) =>
-              Pull.outputChunk(ByteVectorChunk(decoded)) >> go(remainder)(tl)
+              Pull.output(ByteVectorChunk(decoded)) >> go(remainder)(tl)
 
             case Left(err) =>
               Pull.raiseError(new Throwable(s"Failed to decode from quotedPrintable: $err (${bv.decodeUtf8})"))

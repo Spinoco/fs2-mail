@@ -1,10 +1,10 @@
 package spinoco.fs2.mail
 
+import cats.Applicative
+import cats.effect.Concurrent
+import cats.effect.concurrent.Ref
 import cats.syntax.all._
-import cats.effect.Effect
 import fs2._
-
-import scala.concurrent.ExecutionContext
 
 package object internal {
 
@@ -17,9 +17,7 @@ package object internal {
     *
     * Once downstream finishes this synchronous queue is read until exhaustion marked by [[None]].
     */
-  def takeThroughDrain[F[_] : Effect, A](predicate: A => Boolean)(
-    implicit EC: ExecutionContext
-  ): Pipe[F, A, A] = { source =>
+  def takeThroughDrain[F[_] : Concurrent, A](predicate: A => Boolean): Pipe[F, A, A] = { source =>
     Stream.eval(fs2.async.synchronousQueue[F, Option[Either[Throwable, A]]]).flatMap{ feedQueue =>
 
       // dequeue and propagate errors to downstream
@@ -32,18 +30,18 @@ package object internal {
 
       // Finished flag, to prevent reading of the synchronous queue in case
       // the down stream consumed all data available to it.
-      Stream.eval(async.refOf[F, Boolean](false)).flatMap{ finishedRef =>
-        Stream.eval(async.start(
+      Stream.eval(Ref.of[F, Boolean](false)).flatMap{ finishedRef =>
+        Stream.eval(Concurrent[F].start(
           source.takeThrough(predicate)
           .evalMap( a => feedQueue.enqueue1(Some(Right(a))))
           .compile.drain.attempt.flatMap { r =>
-            finishedRef.setSync(true) >> feedQueue.enqueue1(r.left.toOption.map(Left(_)))
+            finishedRef.set(true) >> feedQueue.enqueue1(r.left.toOption.map(Left(_)))
           }
-        )).flatMap(_ =>
+        ).map(_.join)).flatMap(_ =>
           dequeue
         ).onFinalize{
           finishedRef.get.flatMap{
-            case true => Effect[F].unit
+            case true => Applicative[F].unit
             case false => dequeue.compile.drain
           }
         }

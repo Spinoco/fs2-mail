@@ -17,7 +17,7 @@ object TakeThroughDrainSpec extends Properties("TakeThroughDrain"){
     // We will be checking if the three remains, but all 0 are gone.
     // In this test twos mean the data between tags
     // one means a tag and three means some other data
-    val source = Stream[Int](2, 2, 2, 2, 2, 2, 1, 3).covary[IO]
+    val source = Stream[IO, Int](2, 2, 2, 2, 2, 2, 1, 3).covary[IO]
 
     fs2.async.unboundedQueue[IO, Int].flatMap{ queue =>
 
@@ -33,7 +33,7 @@ object TakeThroughDrainSpec extends Properties("TakeThroughDrain"){
     // We will be checking if the three remains, but all 0 are gone.
     // In this test twos mean the data between tags
     // one means a tag and three means some other data
-    val source = Stream[Int](2, 2, 2, 2, 2, 2, 1, 3).covary[IO]
+    val source = Stream[IO, Int](2, 2, 2, 2, 2, 2, 1, 3).covary[IO]
 
     fs2.async.unboundedQueue[IO, Int].flatMap{ queue =>
       (source.to(queue.enqueue).drain ++
@@ -46,7 +46,7 @@ object TakeThroughDrainSpec extends Properties("TakeThroughDrain"){
   val Boom = new Throwable("Boom")
 
   property("propagate-failure-from-source") = protect {
-    val source = Stream[Int](2, 2, 2, 2, 2, 2, 1, 3).covary[IO] ++ Stream.raiseError(Boom)
+    val source = Stream[IO, Int](2, 2, 2, 2, 2, 2, 1, 3).covary[IO] ++ Stream.raiseError(Boom)
 
     fs2.async.unboundedQueue[IO, Int].flatMap{ queue =>
       (source.to(queue.enqueue).drain ++
@@ -57,7 +57,7 @@ object TakeThroughDrainSpec extends Properties("TakeThroughDrain"){
   }
 
   property("propagate-failure-on-finalize") = protect {
-    val source = Stream[Int](2, 2, 2, 2, 2, 2, 1, 3).covary[IO] ++ Stream.raiseError(Boom)
+    val source = Stream[IO, Int](2, 2, 2, 2, 2, 2, 1, 3).covary[IO] ++ Stream.raiseError(Boom)
 
     fs2.async.unboundedQueue[IO, Int].flatMap{ queue =>
       (source.to(queue.enqueue).drain ++

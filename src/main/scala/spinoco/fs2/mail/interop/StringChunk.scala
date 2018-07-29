@@ -12,6 +12,9 @@ final class StringChunk(val stringValue: String) extends Chunk[Char] {
     (StringChunk(h), StringChunk(t))
   }
 
+  def copyToArray[O2 >: Char](xs: Array[O2], start: Int): Unit = {
+    stringValue.iterator.copyToArray(xs, start)
+  }
 }
 
 

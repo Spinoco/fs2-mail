@@ -1,14 +1,14 @@
 package spinoco.fs2.mail.encoding
 
-import java.nio.{ByteBuffer, CharBuffer}
 import java.nio.charset._
+import java.nio.{ByteBuffer, CharBuffer}
 
 import cats.effect.Sync
-import fs2.interop.scodec.ByteVectorChunk
+import fs2.Chunk.ByteVectorChunk
 import fs2._
 import scodec.bits.ByteVector
-
 import spinoco.fs2.mail.interop.StringChunk
+
 import scala.annotation.tailrec
 
 object charset {
@@ -60,7 +60,7 @@ object charset {
                   // we may have still bytes remaining in input buffer, if so, we have to
                   // store these data and use in next invocation
                   val buff0 = if (bb.remaining() == 0) ByteVector.empty else ByteVector.view(bb)
-                  Pull.outputChunk(outChunk) >> go(buff0)(tail)
+                  Pull.output(outChunk) >> go(buff0)(tail)
 
                 case other =>
                   Pull.raiseError(new Throwable(s"Unexpected Result when decoding: $other"))
@@ -74,7 +74,7 @@ object charset {
                   Pull.raiseError(new Throwable("Unexpected Decoding Overflow (flush)")) // impossible
 
                 case CoderResult.UNDERFLOW =>
-                  Pull.outputChunk(out)
+                  Pull.output(out)
 
                 case other =>
                   Pull.raiseError(new Throwable(s"Unexpected Decoding Result when flushing: $result"))
@@ -88,11 +88,11 @@ object charset {
                 Pull.raiseError(new Throwable("Unexpected Decoding Overflow (last)")) // impossible
 
               case CoderResult.UNDERFLOW =>
-                Pull.outputChunk(outChunk) >> flush
+                Pull.output(outChunk) >> flush
 
               case other =>
                 if (other.isError) Pull.raiseError(new Throwable(s"Unexpected Result when finalizing decode: $result"))
-                else Pull.outputChunk(outChunk) >> flush
+                else Pull.output(outChunk) >> flush
             }
         }
       }
@@ -126,7 +126,7 @@ object charset {
                 // we may have still bytes remaining in input buffer, if so, we have to
                 // store these data and use in next invocation
                 val buff0 = chb.toString
-                Pull.outputChunk(outChunk) >> go(buff0)(tail)
+                Pull.output(outChunk) >> go(buff0)(tail)
 
               case other =>
                 Pull.raiseError(new Throwable(s"Unexpected Result when decodeing: $other"))
@@ -139,7 +139,7 @@ object charset {
                   Pull.raiseError(new Throwable("Unexpected Encoding Overflow (flush)")) // impossible
 
                 case CoderResult.UNDERFLOW =>
-                  Pull.outputChunk(out)
+                  Pull.output(out)
 
                 case other =>
                   Pull.raiseError(new Throwable(s"Unexpected Encoding Result when flushing: $result"))
@@ -153,11 +153,11 @@ object charset {
                 Pull.raiseError(new Throwable("Unexpected Encoding Overflow (last)")) // impossible
 
               case CoderResult.UNDERFLOW =>
-                Pull.outputChunk(outChunk) >> flush
+                Pull.output(outChunk) >> flush
 
               case other =>
                 if (other.isError) Pull.raiseError(new Throwable(s"Unexpected Result when finalizing encode: $result"))
-                else Pull.outputChunk(outChunk) >> flush
+                else Pull.output(outChunk) >> flush
             }
         }
       }

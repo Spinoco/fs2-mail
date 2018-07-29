@@ -3,16 +3,15 @@ package spinoco.fs2.mail.smtp
 import java.time.{ZoneId, ZonedDateTime}
 
 import cats.effect.IO
+import fs2.Chunk.ByteVectorChunk
 import fs2._
-import fs2.interop.scodec.ByteVectorChunk
-import org.scalacheck.Properties
 import org.scalacheck.Prop._
+import org.scalacheck.Properties
 import scodec.bits.ByteVector
-
 import spinoco.fs2.mail.interop.StringChunk
 import spinoco.fs2.mail.mime.MIMEPart
-import spinoco.protocol.mail.{EmailAddress, EmailHeader}
 import spinoco.protocol.mail.header.codec.EmailHeaderCodec
+import spinoco.protocol.mail.{EmailAddress, EmailHeader}
 import spinoco.protocol.mime.MediaType
 
 object MIMEEncodeMultipartSpec extends Properties("MIMEEncodeMultipart") {

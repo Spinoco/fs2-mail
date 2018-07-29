@@ -1,7 +1,7 @@
 package spinoco.fs2.mail.encoding
 
+import fs2.Chunk.ByteVectorChunk
 import fs2._
-import fs2.interop.scodec.ByteVectorChunk
 import scodec.bits.ByteVector
 
 import scala.annotation.tailrec
@@ -59,7 +59,7 @@ object lines {
           val head = bv.take(length)
           if (head.size < length) {
             if (result.nonEmpty) {
-              Pull.outputChunk(ByteVectorChunk(result)) >> go(bv)(tl)
+              Pull.output(ByteVectorChunk(result)) >> go(bv)(tl)
             } else {
               go(bv)(tl)
             }
@@ -67,7 +67,7 @@ object lines {
             val chunks = bv.grouped(length)
             val lastChunk = chunks.lastOption.getOrElse(ByteVector.empty)
             val chunksOut = if (lastChunk.nonEmpty) chunks.init else chunks
-            Pull.outputChunk(ByteVectorChunk(result ++ ByteVector.concat(chunksOut.map(h => prefixBytes ++ h ++ crlf)))) >> go(lastChunk)(tl)
+            Pull.output(ByteVectorChunk(result ++ ByteVector.concat(chunksOut.map(h => prefixBytes ++ h ++ crlf)))) >> go(lastChunk)(tl)
           }
         } else {
           val (head, t) = bv.splitAt(idx)
@@ -84,7 +84,7 @@ object lines {
 
         case None =>
           if (buff.isEmpty) Pull.done
-          else Pull.outputChunk(ByteVectorChunk(prefixBytes ++ buff ++ crlf))
+          else Pull.output(ByteVectorChunk(prefixBytes ++ buff ++ crlf))
       }
     }
     go(ByteVector.empty)(_).stream
