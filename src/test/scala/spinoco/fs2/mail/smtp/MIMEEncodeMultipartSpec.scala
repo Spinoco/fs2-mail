@@ -180,7 +180,8 @@ object MIMEEncodeMultipartSpec extends Properties("MIMEEncodeMultipart") {
         |Content-Type: image/jpeg
         |Content-Transfer-Encoding: base64
         |Content-ID: <jpeg-picture>
-        |Content-Disposition: attachment; filename="awesome.jpeg"
+        |Content-Disposition: attachment;
+        | filename="awesome.jpeg"
         |
         |  AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1N
         |  jc4OTo7PD0+P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV5fYGFiY2RlZmdoaWprbG
