@@ -11,7 +11,7 @@ import fs2._
 import spinoco.fs2.mail.encoding
 import spinoco.fs2.mail.encoding.lines
 import spinoco.protocol.mail.mime.TransferEncoding.{DefaultEncodings, StandardEncoding}
-import spinoco.protocol.mime.{ContentDisposition, ContentType, MIMECharset, MediaType}
+import spinoco.protocol.mime._
 import spinoco.protocol.mime.MediaType.{DefaultMediaType, MultipartMediaType}
 
 
@@ -152,7 +152,7 @@ object MIMEPart {
     , stream: Stream[F, Byte]
   ): SinglePart[F] = {
     val bin = binary(id, tpe, stream)
-    bin.copy(header = bin.header.contentDisposition(ContentDisposition("attachment", Map("filename" -> fileName))))
+    bin.copy(header = bin.header.contentDisposition(ContentDisposition(ContentDispositionType.Attachment, Map("filename" -> fileName))))
   }
 
 
