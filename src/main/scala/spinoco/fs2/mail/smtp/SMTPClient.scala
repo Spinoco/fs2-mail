@@ -1,6 +1,6 @@
 package spinoco.fs2.mail.smtp
 
-import cats.effect.concurrent.{Deferred, Semaphore}
+import cats.effect.concurrent.{Deferred, Ref, Semaphore}
 import cats.effect.{Concurrent, Sync}
 import cats.syntax.all._
 import fs2.Chunk.ByteVectorChunk
@@ -95,12 +95,15 @@ object SMTPClient {
     */
   def mk[F[_]: Concurrent](
     socket: Socket[F]
+    , tlsHandshake: Socket[F] => F[Socket[F]]
     , initialHandshakeTimeout: FiniteDuration
     , sendTimeout: FiniteDuration
+    , startTls: Boolean = false
     , emailHeaderCodec: Codec[EmailHeader] = EmailHeaderCodec.codec(100 * 1024) // 100K max header size
     , mimeHeaderCodec: Codec[MIMEHeader] = EmailHeaderCodec.mimeCodec(10 * 1024) // 10K for mime shall be enough
   ): Stream[F, SMTPClient[F]] = {
-    implicit val socket_ = socket
+    Stream.eval(Ref.of[F, Socket[F]](socket)).flatMap { implicit socketRef =>
+    Stream.eval(Ref.of[F, Boolean](!startTls)).flatMap { implicit tlsConnection =>
     Stream.eval(Semaphore[F](0)) flatMap { sending =>
     Stream.eval(Deferred[F, String]) flatMap { serverIdRef =>
 
@@ -117,7 +120,12 @@ object SMTPClient {
       new SMTPClient[F] {
         def serverId: F[String] = serverIdRef.get
         def connect(domain: String): F[Seq[String]] =
-          sendRequest(impl.connect(domain)).map(_.map(_.data))
+          sendRequest(impl.connect(domain)).map(_.map(_.data)).flatMap { response =>
+            tlsConnection.get.flatMap {
+              case true => Sync[F].pure(response)
+              case false => impl.startTls(response, tlsHandshake)
+            }
+          }
 
         def login(userName: String, password: String): F[Unit] =
           impl.login(userName, password)
@@ -137,7 +145,7 @@ object SMTPClient {
           impl.sendMail(from, recipients, impl.encodeMimeBody(header, body, emailHeaderCodec, mimeHeaderCodec))
       }}
 
-    }}
+    }}}}
   }
 
 
@@ -153,13 +161,15 @@ object SMTPClient {
       */
     def initialHandshake[F[_]](
       timeout: FiniteDuration
-    )(implicit socket: Socket[F], F: Sync[F]): F[String] = {
-      (socket.reads(1024, Some(timeout)) through readResponse).compile.toVector flatMap { resp =>
-        resp.headOption match {
-          case Some(resp@SMTPResponse(code, text)) =>
-            if (code == Code.Ready) F.pure(text)
-            else F.raiseError(new SMTPError(resp))
-          case None => F.raiseError(new Throwable("Expected at least one response with code 220, got None"))
+    )(implicit socketRef: Ref[F, Socket[F]], F: Sync[F]): F[String] = {
+      socketRef.get.flatMap { socket =>
+        (socket.reads(1024, Some(timeout)) through readResponse).compile.toVector flatMap { resp =>
+          resp.headOption match {
+            case Some(resp@SMTPResponse(code, text)) =>
+              if (code == Code.Ready) F.pure(text)
+              else F.raiseError(new SMTPError(resp))
+            case None => F.raiseError(new Throwable("Expected at least one response with code 220, got None"))
+          }
         }
       }
     }
@@ -229,13 +239,15 @@ object SMTPClient {
     def sendRequest[F[_] : Sync](
        timeout: FiniteDuration
       , sending: Semaphore[F]
-    )(data: Stream[F, Byte])(implicit socket: Socket[F]): F[Seq[SMTPResponse]] = {
-      sending.acquire >>
-      ( data.to(socket.writes()).compile.drain >>
-        socket.reads(1024, Some(timeout)).through(readResponse).compile.toVector
-      ).attempt flatMap {
-        case Right(rslt) => sending.release as rslt
-        case Left(err) => sending.release >> Sync[F].raiseError(err)
+    )(data: Stream[F, Byte])(implicit socketRef: Ref[F, Socket[F]]): F[Seq[SMTPResponse]] = {
+      socketRef.get.flatMap { socket =>
+        sending.acquire >>
+          (data.to(socket.writes()).compile.drain >>
+            socket.reads(1024, Some(timeout)).through(readResponse).compile.toVector
+            ).attempt flatMap {
+          case Right(rslt) => sending.release as rslt
+          case Left(err) => sending.release >> Sync[F].raiseError(err)
+        }
       }
     }
 
@@ -281,6 +293,33 @@ object SMTPClient {
         }
       }
 
+    }
+
+    def startTls[F[_] : Sync](connectResponse: Seq[String], tlsHandshake: Socket[F] => F[Socket[F]])(
+      implicit send: Stream[F, Byte] => F[Seq[SMTPResponse]]
+      , socketRef: Ref[F, Socket[F]]
+      , tlsConnection: Ref[F, Boolean]
+    ): F[Seq[String]] = {
+      val startTlsCommand: F[Unit] = send(command("STARTTLS")) flatMap { resp =>
+          resp.headOption match {
+            case Some(resp@SMTPResponse(code, _)) =>
+              if (code == Code.Ready) Sync[F].unit
+              else Sync[F].raiseError(SMTPError(resp))
+
+            case None => Sync[F].raiseError(new Throwable("STARTTLS expects at least one response with code 220, got None"))
+          }
+        }
+
+
+      if (connectResponse.exists(_.contains("STARTTLS"))) {
+        startTlsCommand >>
+        socketRef.get.flatMap(tlsHandshake).flatMap { s =>
+          socketRef.set(s) >>
+          tlsConnection.set(true) as connectResponse
+        }
+      } else {
+        Sync[F].raiseError(new Throwable("Connection doesn't support STARTTLS"))
+      }
     }
 
     private val zero = ByteVector.view(Array[Byte](0))
