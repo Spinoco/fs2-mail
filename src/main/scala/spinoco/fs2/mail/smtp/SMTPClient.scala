@@ -301,14 +301,15 @@ object SMTPClient {
       , tlsConnection: Ref[F, Boolean]
     ): F[Seq[String]] = {
       val startTlsCommand: F[Unit] = send(command("STARTTLS")) flatMap { resp =>
-          resp.headOption match {
-            case Some(resp@SMTPResponse(code, _)) =>
-              if (code == Code.Ready) Sync[F].unit
-              else Sync[F].raiseError(SMTPError(resp))
+        resp.headOption match {
+          case Some(resp@SMTPResponse(code, _)) =>
+            if (code == Code.Ready) Sync[F].unit
+            else Sync[F].raiseError(SMTPError(resp))
 
-            case None => Sync[F].raiseError(new Throwable("STARTTLS expects at least one response with code 220, got None"))
-          }
+          case None => Sync[F].raiseError(new Throwable("STARTTLS expects at least one response with code 220, got None"))
         }
+      }
+
 
 
       if (connectResponse.exists(_.contains("STARTTLS"))) {
