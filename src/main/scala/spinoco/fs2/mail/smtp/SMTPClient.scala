@@ -119,13 +119,15 @@ object SMTPClient {
       Stream.eval(initialize) map { _ =>
       new SMTPClient[F] {
         def serverId: F[String] = serverIdRef.get
-        def connect(domain: String): F[Seq[String]] =
+        def connect(domain: String): F[Seq[String]] = {
           sendRequest(impl.connect(domain)).map(_.map(_.data)).flatMap { response =>
             tlsConnection.get.flatMap {
               case true => Sync[F].pure(response)
-              case false => impl.startTls(response, tlsHandshake)
+              case false =>
+                impl.startTls(response, tlsHandshake) >> sendRequest(impl.connect(domain)).map(_.map(_.data))
             }
           }
+        }
 
         def login(userName: String, password: String): F[Unit] =
           impl.login(userName, password)
@@ -299,7 +301,7 @@ object SMTPClient {
       implicit send: Stream[F, Byte] => F[Seq[SMTPResponse]]
       , socketRef: Ref[F, Socket[F]]
       , tlsConnection: Ref[F, Boolean]
-    ): F[Seq[String]] = {
+    ): F[Unit] = {
       val startTlsCommand: F[Unit] = send(command("STARTTLS")) flatMap { resp =>
         resp.headOption match {
           case Some(resp@SMTPResponse(code, _)) =>
@@ -310,13 +312,11 @@ object SMTPClient {
         }
       }
 
-
-
       if (connectResponse.exists(_.contains("STARTTLS"))) {
         startTlsCommand >>
         socketRef.get.flatMap(tlsHandshake).flatMap { s =>
           socketRef.set(s) >>
-          tlsConnection.set(true) as connectResponse
+          tlsConnection.set(true)
         }
       } else {
         Sync[F].raiseError(new Throwable("Connection doesn't support STARTTLS"))
