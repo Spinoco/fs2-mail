@@ -104,7 +104,7 @@ object IMAPClientFetchSpec extends Properties("IMAPClient.Fetch"){
       |""".stripMargin.lines.mkString("\r\n")
 
   val multipleHeadersResponse =
-    """* 4249 FETCH (UID 4267 BODY[HEADER] {4774}
+    """* 4249 FETCH (BODY[HEADER] {4774}
       |Delivered-To: pavel.chlupacek@spinoco.com
       |Received: by 10.223.135.145 with SMTP id b17csp1269216wrb; Tue, 14 Nov 2017
       | 07:02:12 -0800 (PST)
@@ -186,7 +186,7 @@ object IMAPClientFetchSpec extends Properties("IMAPClient.Fetch"){
       |X-MSYS-API: {"options":{"open_tracking":false,"click_tracking":false}}
       |X-MktMailDKIM: true
       |
-      |)
+      | UID 4267)
       |* 4250 FETCH (UID 4268 BODY[HEADER] {5042}
       |Delivered-To: pavel.chlupacek@spinoco.com
       |Received: by 10.223.135.145 with SMTP id b17csp1326716wrb; Tue, 14 Nov 2017
@@ -299,25 +299,17 @@ object IMAPClientFetchSpec extends Properties("IMAPClient.Fetch"){
     )
   }
 
-
-
-
   property("decode-fetch-header-result-multi") = forAll(Gen.choose(1, multipleHeadersResponse.size))  { sz =>
     parseFetchResponse(multipleHeadersResponse, sz) ?= Vector(
-      Left("* 4249 FETCH (UID 4267 BODY[HEADER] ")
+      Left("* 4249 FETCH (BODY[HEADER] ")
       , Right(4774)
-      , Left(")")
+      , Left(" UID 4267)")
       , Left("* 4250 FETCH (UID 4268 BODY[HEADER] ")
       , Right(5042)
       , Left(")")
       , Left("4 OK Success")
     )
-
   }
-
-
-
-
 
   def parseFetchRawResponse(resp: String, chunkSz: Int): Vector[(Int, String, Either[String, Long])] = {
     IMAPClient.impl.rawContent[IO](Stream(Right(
@@ -355,10 +347,9 @@ object IMAPClientFetchSpec extends Properties("IMAPClient.Fetch"){
 
 
   property("decode-fetch-raw-content-multiple") = forAll(Gen.choose(1, multipleHeadersResponse.size))  { sz =>
-
     parseFetchRawResponse(multipleHeadersResponse, sz) ?= Vector(
-      (0, "UID", Left("4267"))
-      , (0, "BODY[HEADER]", Right(4774l))
+      (0, "BODY[HEADER]", Right(4774l))
+      , (0, "UID", Left("4267"))
       , (1, "UID", Left("4268"))
       , (1, "BODY[HEADER]", Right(5042l))
     )
