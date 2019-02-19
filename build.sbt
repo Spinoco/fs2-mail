@@ -31,7 +31,7 @@ lazy val commonSettings = Seq(
   libraryDependencies ++= Seq(
     "co.fs2" %% "fs2-core" % fs2Version
     , "co.fs2" %% "fs2-io" % fs2Version
-    , "com.spinoco" %% "protocol-mail" % "0.3.16"
+    , "com.spinoco" %% "protocol-mail" % "0.3.17"
     , "com.beetstra.jutf7" % "jutf7" % "1.0.0"
     , "org.scalacheck" %% "scalacheck" % "1.13.4" % "test"
   ),
