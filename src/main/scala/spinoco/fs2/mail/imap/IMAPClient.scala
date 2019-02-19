@@ -180,7 +180,6 @@ object IMAPClient {
             shortContent(request(Select(mailbox)))(parseSelect[F])
 
           def examine(mailbox: @@[String, MailboxName]) =
-            Sync[F].delay(println(s"Examine $mailbox")) >>
             shortContent(request(Examine(mailbox)))(parseSelect[F])
 
           def list(reference: String, wildcardName: String): F[IMAPResult[Seq[IMAPMailbox]]] =
@@ -575,6 +574,9 @@ object IMAPClient {
     // Indicates successfull result of the fetch, must be only non-result line in the fetch, then the fetch will terminate
     private val successFullFetch = "^(?i).+ OK .+$".r
 
+    // search for end of entry
+    private val endOfEntry = "\\s|\\)".r
+
     /**
       * From the supplied stream this will extract stream of raw content.
       *
@@ -638,7 +640,7 @@ object IMAPClient {
                 def output(offset: Int, sz: Int) = { // end is > 0
                   val value = valueCandidate.slice(offset, sz)
                   Pull.output1((recordIdx, key, IMAPText(value))) >>
-                  findEntry(recordIdx)(Stream.emit(IMAPText(valueCandidate.drop(offset + sz + 1))) ++ tl)
+                  findEntry(recordIdx)(Stream.emit(IMAPText(valueCandidate.drop(offset + sz))) ++ tl)
                 }
 
                 if (valueCandidate.startsWith("(")) {
@@ -649,10 +651,10 @@ object IMAPClient {
                   if (end < 0) Pull.raiseError(new Throwable(s"Expected value for $key in brackets, but got $valueCandidate"))
                   else output(1, end - 1)
                 } else {
-                  // take everything till next space, or switch to bytes mode if no entry
-                  val end = valueCandidate.indexOf(' ')
-                  if (end <= 0) Pull.output1((recordIdx, key, IMAPBytes(ByteVector.empty))) >> collectBytes(recordIdx, key)(tl)
-                  else output(0, end)
+                  endOfEntry.findFirstMatchIn(valueCandidate) match {
+                    case None => Pull.output1((recordIdx, key, IMAPBytes(ByteVector.empty))) >> collectBytes(recordIdx, key)(tl)
+                    case Some(m) => output(0, m.start)
+                  }
                 }
               }
             }
