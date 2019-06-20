@@ -577,6 +577,9 @@ object IMAPClient {
     // search for end of entry
     private val endOfEntry = "\\s|\\)".r
 
+    //search for EXISTS line
+    private val exists = """\s*(\d+)\s+EXISTS\s*""".r
+
     /**
       * From the supplied stream this will extract stream of raw content.
       *
@@ -676,7 +679,9 @@ object IMAPClient {
               case Some(start) =>
                 findEntry(recordIdx)(Stream.emit(IMAPText(start)) ++ tail)
               case None =>
-                if (successFullFetch.findFirstMatchIn(l).nonEmpty) Pull.done
+                /** ignore EXISTS line **/
+                if (exists.findFirstMatchIn(l).nonEmpty) findRecord(recordIdx)(tail)
+                else if (successFullFetch.findFirstMatchIn(l).nonEmpty) Pull.done
                 else Pull.raiseError(new Throwable(s"Expected start of record at $recordIdx, but got $l"))
             }
 

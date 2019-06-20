@@ -99,6 +99,7 @@ object IMAPClientFetchSpec extends Properties("IMAPClient.Fetch"){
       | 00:43:21 +0000
       |
       |)
+      |* 18617 EXISTS
       |3 OK Success
       |
       |""".stripMargin.lines.mkString("\r\n")
@@ -295,6 +296,7 @@ object IMAPClientFetchSpec extends Properties("IMAPClient.Fetch"){
       Left("* 4250 FETCH (UID 4268 BODY[HEADER] ")
       , Right(5042)
       , Left(")")
+      , Left("* 18617 EXISTS")
       , Left("3 OK Success")
     )
   }
