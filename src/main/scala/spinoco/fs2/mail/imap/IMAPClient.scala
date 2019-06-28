@@ -546,11 +546,20 @@ object IMAPClient {
         }}
       }
 
+      def asNilHeader(data: Vector[IMAPData], failWith: String): Either[String, EmailHeader] = {
+        asString(data).flatMap { textData =>
+          if (textData == "NIL") Right(EmailHeader(List.empty))
+          else Left(failWith)
+
+        }
+      }
+
       def getHeader(m: Map[String, Vector[IMAPData]]): Either[String, EmailHeader] = {
         m.get("BODY[HEADER]").map(Right(_)).getOrElse(Left("Missing BODY[HEADER] key")).right flatMap { data =>
-        asBytes(data).right flatMap { hdrBytes =>
-          headerCodec.decodeValue(hdrBytes.bits).toEither.left.map(_.messageWithContext)
-        }}
+          asBytes(data).right.flatMap { hdrBytes =>
+            headerCodec.decodeValue(hdrBytes.bits).toEither.left.map(_.messageWithContext)
+          }.left.flatMap(asNilHeader(data, _))
+        }
       }
 
       _ map { m =>
