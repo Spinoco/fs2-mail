@@ -15,8 +15,6 @@ import spinoco.protocol.mail.header.codec.EmailHeaderCodec
 
 object IMAPClientFetchSpec extends Properties("IMAPClient.Fetch"){
 
-  val emptyHeaderResponse = "* 20948 FETCH (UID 16578604 BODY[HEADER] NIL)\r\n"
-
   val headerSingleResponse =
     """* 4250 FETCH (UID 4268 BODY[HEADER] {5042}
       |Delivered-To: pavel.chlupacek@spinoco.com
@@ -293,13 +291,6 @@ object IMAPClientFetchSpec extends Properties("IMAPClient.Fetch"){
     .compile.toVector.unsafeRunSync()
   }
 
-
-  property("decode-fetch-empty-header-result") = protect {
-    parseFetchResponse(emptyHeaderResponse, 1024) ?= Vector(
-      Left("* 20948 FETCH (UID 16578604 BODY[HEADER] NIL)")
-    )
-  }
-
   property("decode-fetch-header-result") = forAll(Gen.choose(1, headerSingleResponse.size)) { sz =>
     parseFetchResponse(headerSingleResponse, sz) ?= Vector(
       Left("* 4250 FETCH (UID 4268 BODY[HEADER] ")
@@ -366,13 +357,6 @@ object IMAPClientFetchSpec extends Properties("IMAPClient.Fetch"){
     )
   }
 
-  property("decode-fetch-raw-content-empty") = protect {
-    parseFetchRawResponse(emptyHeaderResponse, 1024) ?= Vector(
-      (0, "UID", Left("16578604"))
-      , (0, "BODY[HEADER]", Left("NIL"))
-    )
-  }
-
 
   def parseFetchEmailHeader(resp: String, chunkSz: Int): Vector[(Long @@ MailUID, Int)] = {
     IMAPClient.impl.rawContent[IO](Stream(Right(
@@ -394,15 +378,9 @@ object IMAPClientFetchSpec extends Properties("IMAPClient.Fetch"){
   }
 
   property("decode-fetch-email-header-multiple") =  forAll(Gen.choose(1, multipleHeadersResponse.size))  { sz =>
-    parseFetchEmailHeader(multipleHeadersResponse, sz) ?= Vector(
+    parseFetchEmailHeader(multipleHeadersResponse, 20000) ?= Vector(
       tag[MailUID](4267l) -> 29
       , tag[MailUID](4268l) -> 26
-    )
-  }
-
-  property("decode-fetch-email-header-empty") = protect {
-    parseFetchEmailHeader(emptyHeaderResponse, 1024) ?= Vector(
-      tag[MailUID](16578604l) -> 0
     )
   }
 
