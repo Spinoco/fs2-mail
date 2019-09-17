@@ -589,6 +589,12 @@ object IMAPClient {
     //search for EXISTS line
     private val exists = """\s*(\d+)\s+EXISTS\s*""".r
 
+    //search for RECENT line
+    private val recent = """\s*(\d+)\s+RECENT\s*""".r
+
+    //search for EXPUNGE line
+    private val expunge = """\s*(\d+)\s+EXPUNGE\s*""".r
+
     /**
       * From the supplied stream this will extract stream of raw content.
       *
@@ -689,7 +695,7 @@ object IMAPClient {
                 findEntry(recordIdx)(Stream.emit(IMAPText(start)) ++ tail)
               case None =>
                 /** ignore EXISTS line **/
-                if (exists.findFirstMatchIn(l).nonEmpty) findRecord(recordIdx)(tail)
+                if (Seq(exists, recent, expunge).exists(_.findFirstMatchIn(l).nonEmpty)) findRecord(recordIdx)(tail)
                 else if (successFullFetch.findFirstMatchIn(l).nonEmpty) Pull.done
                 else Pull.raiseError(new Throwable(s"Expected start of record at $recordIdx, but got $l"))
             }

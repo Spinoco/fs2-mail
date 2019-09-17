@@ -102,6 +102,8 @@ object IMAPClientFetchSpec extends Properties("IMAPClient.Fetch"){
       |
       |)
       |* 18617 EXISTS
+      |* 0 RECENT
+      |* 0 EXPUNGE
       |3 OK Success
       |
       |""".stripMargin.lines.mkString("\r\n")
@@ -306,6 +308,8 @@ object IMAPClientFetchSpec extends Properties("IMAPClient.Fetch"){
       , Right(5042)
       , Left(")")
       , Left("* 18617 EXISTS")
+      , Left("* 0 RECENT")
+      , Left("* 0 EXPUNGE")
       , Left("3 OK Success")
     )
   }
