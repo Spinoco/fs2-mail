@@ -18,7 +18,7 @@ package object internal {
     * Once downstream finishes this synchronous queue is read until exhaustion marked by [[None]].
     */
   def takeThroughDrain[F[_] : Concurrent, A](predicate: A => Boolean): Pipe[F, A, A] = { source =>
-    Stream.eval(fs2.async.synchronousQueue[F, Option[Either[Throwable, A]]]).flatMap{ feedQueue =>
+    Stream.eval(fs2.concurrent.Queue.synchronous[F, Option[Either[Throwable, A]]]).flatMap{ feedQueue =>
 
       // dequeue and propagate errors to downstream
       def dequeue:Stream[F, A] = {

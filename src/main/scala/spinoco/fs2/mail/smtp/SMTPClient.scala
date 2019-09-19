@@ -190,9 +190,9 @@ object SMTPClient {
       * It assumes the server never sends more data than very last \r\n, as the other data received will be discarded.
       *
       */
-    def readResponse[F[_]]: Pipe[F, Byte, SMTPResponse] = {
+    def readResponse[F[_]: RaiseThrowable]: Pipe[F, Byte, SMTPResponse] = {
       def go(buff: ByteVector)(s: Stream[F, Byte]): Pull[F, String, Unit] = {
-        s.pull.unconsChunk.flatMap {
+        s.pull.uncons.flatMap {
           case Some((ch, tl)) =>
             val bs = ch.toBytes
             val bv = buff ++ ByteVector.view(bs.values, bs.offset, bs.size)
@@ -244,7 +244,7 @@ object SMTPClient {
     )(data: Stream[F, Byte])(implicit socketRef: Ref[F, Socket[F]]): F[Seq[SMTPResponse]] = {
       socketRef.get.flatMap { socket =>
         sending.acquire >>
-          (data.to(socket.writes()).compile.drain >>
+          (data.through(socket.writes()).compile.drain >>
             socket.reads(1024, Some(timeout)).through(readResponse).compile.toVector
             ).attempt flatMap {
           case Right(rslt) => sending.release as rslt
@@ -414,7 +414,7 @@ object SMTPClient {
       */
     def insertDotIfNeeded[F[_]]: Pipe[F, Byte, Byte] = {
       def go(buff: ByteVector)(s: Stream[F, Byte]): Pull[F, Byte, Unit] = {
-        s.pull.unconsChunk.flatMap {
+        s.pull.uncons.flatMap {
           case Some((ch, tl)) =>
             val bs = ch.toBytes
             val bv = buff ++ ByteVector.view(bs.values, bs.offset, bs.size)
@@ -511,7 +511,7 @@ object SMTPClient {
       * @tparam F
       * @return
       */
-    def encodeMimeBody[F[_]](
+    def encodeMimeBody[F[_]: RaiseThrowable](
       header: EmailHeader
       , body: MIMEPart[F]
       , emailHeaderCodec: Codec[EmailHeader]

@@ -429,7 +429,7 @@ object IMAPClient {
       * @tparam F
       * @return
       */
-    def fetchBytesOf[F[_]](
+    def fetchBytesOf[F[_]: RaiseThrowable](
       contentIdx: Int
       , contentKey: String
       , encoding: String
@@ -437,8 +437,8 @@ object IMAPClient {
 
       val decoder: Pipe[F, Byte, Byte] = { s =>
         encoding.toUpperCase match {
-          case "BASE64" => base64.decode[F](s)
-          case "QUOTED-PRINTABLE" => quotedPrintable.decode[F](s)
+          case "BASE64" => s through base64.decode[F]
+          case "QUOTED-PRINTABLE" => s through quotedPrintable.decode[F]
           case _ => s
         }
       }
@@ -455,7 +455,7 @@ object IMAPClient {
       * @param encoding     Encoding of the data
       * @param charsetName  Name of the charset of the text. If empty, UTF-8 will be used instead
       */
-    def fetchTextOf[F[_]: Sync](
+    def fetchTextOf[F[_]: Sync: RaiseThrowable](
       contentIdx: Int
       , contentKey: String
       , encoding: String
@@ -469,8 +469,8 @@ object IMAPClient {
 
       val decoder: Pipe[F, Byte, Char] = { s =>
         encoding.toUpperCase match {
-          case "BASE64" => base64.decode[F](s) through charset.decode(chs)
-          case "QUOTED-PRINTABLE" => quotedPrintable.decode[F](s) through charset.decode(chs)
+          case "BASE64" => s through base64.decode[F] through charset.decode(chs)
+          case "QUOTED-PRINTABLE" => s through quotedPrintable.decode[F] through charset.decode(chs)
           case _ => s through charset.decode(chs)
         }
       }
@@ -520,7 +520,7 @@ object IMAPClient {
       *
       * This requires UID content and BODY[HEADER] content to be present in map otherwise this will fail.
       */
-    def mkEmailHeader[F[_]](
+    def mkEmailHeader[F[_]: RaiseThrowable](
       headerCodec: Codec[EmailHeader]
     ): Pipe[F, Map[String,  Vector[IMAPData]], IMAPEmailHeader] = {
       def asString(data: Vector[IMAPData]): Either[String, String] = {
@@ -610,7 +610,7 @@ object IMAPClient {
       * @tparam F
       * @return
       */
-    def rawContent[F[_]](result: RequestResult[F]): Stream[F, (Int, String, IMAPData)] = {
+    def rawContent[F[_]: RaiseThrowable](result: RequestResult[F]): Stream[F, (Int, String, IMAPData)] = {
       def collectBytes(recordIdx: Int, key: String)(s: Stream[F, IMAPData]): Pull[F, (Int, String, IMAPData), Unit] = {
         def go(s: Stream[F, IMAPData]): Pull[F, (Int, String, IMAPData), Unit] = {
           s.pull.uncons1.flatMap {
@@ -737,11 +737,11 @@ object IMAPClient {
       * various encodings.
       *
       */
-    def lines[F[_]]: Pipe[F, Byte, IMAPData] = {
+    def lines[F[_]: RaiseThrowable]: Pipe[F, Byte, IMAPData] = {
       val crlf = ByteVector.view("\r\n".getBytes)
 
       def collectChunk(sz: Int)(s: Stream[F, Byte]): Pull[F, IMAPData, Unit] = {
-        s.pull.unconsChunk.flatMap {
+        s.pull.uncons.flatMap {
           case Some((chunk, tl)) =>
             val bs = chunk.toBytes
             val bv =  ByteVector.view(bs.values, bs.offset, bs.size)
@@ -757,7 +757,7 @@ object IMAPClient {
       }
 
       def collectLines(buff: ByteVector)(s: Stream[F, Byte]):  Pull[F, IMAPData, Unit] = {
-        s.pull.unconsChunk.flatMap {
+        s.pull.uncons.flatMap {
           case Some((chunk, tl)) =>
             val bs = chunk.toBytes
             val nb = buff ++ ByteVector.view(bs.values, bs.offset, bs.size)

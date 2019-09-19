@@ -12,7 +12,7 @@ object lines {
   /** decodes bytes in chunk of bytes by supplied separator. Last line is emitted even when not terminated by `separator` **/
   def by[F[_]](separator: ByteVector): Pipe[F, Byte, Chunk[Byte]] = {
     def go(buff: ByteVector)(s: Stream[F, Byte]): Pull[F, Chunk[Byte], Unit] = {
-      s.pull.unconsChunk.flatMap {
+      s.pull.uncons.flatMap {
         case Some((ch, tl)) =>
           val bs = ch.toBytes
           val data = buff ++ ByteVector.view(bs.values, bs.offset, bs.size)
@@ -64,7 +64,7 @@ object lines {
               go(bv)(tl)
             }
           } else {
-            val chunks = bv.grouped(length)
+            val chunks = bv.grouped(length).toList
             val lastChunk = chunks.lastOption.getOrElse(ByteVector.empty)
             val chunksOut = if (lastChunk.nonEmpty) chunks.init else chunks
             Pull.output(ByteVectorChunk(result ++ ByteVector.concat(chunksOut.map(h => prefixBytes ++ h ++ crlf)))) >> go(lastChunk)(tl)
@@ -76,7 +76,7 @@ object lines {
         }
       }
 
-      s.pull.unconsChunk.flatMap {
+      s.pull.uncons.flatMap {
         case Some((ch, tl)) =>
           val bs = ch.toBytes
           val bv = buff ++ ByteVector.view(bs.values, bs.offset, bs.size)
