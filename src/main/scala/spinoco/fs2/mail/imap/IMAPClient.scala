@@ -314,7 +314,7 @@ object IMAPClient {
               Pull.raiseError(new Throwable("Invalid client state initial response not received"))
 
           }
-          .stream
+          .void.stream
           .onFinalize(requestSemaphore.release)
       }
     }
