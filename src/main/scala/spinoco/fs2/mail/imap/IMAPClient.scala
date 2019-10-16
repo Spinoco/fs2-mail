@@ -107,6 +107,9 @@ trait IMAPClient[F[_]] {
     */
   def bodyStructureOf(uid: Long @@ MailUID): F[IMAPResult[Seq[EmailBodyPart]]]
 
+  @deprecated("Use bytesOfBodyPart instead", "2019-10-16")
+  def bytesOf(uid: Long @@ MailUID, part: EmailBodyPart.BinaryPart): Stream[F, Byte]
+
   /**
     * Allows to fetch bytes of given mime binary part
     * @param uid    Id of message
@@ -114,7 +117,10 @@ trait IMAPClient[F[_]] {
     *               to parse conent to stream of bytes.
     * @return
     */
-  def bytesOf(uid: Long @@ MailUID, part: EmailBodyPart.BinaryPart): Stream[F, Byte]
+  def bytesOfBodyPart(uid: Long @@ MailUID, part: EmailBodyPart): Stream[F, Byte]
+
+  @deprecated("Use textOfBodyPart instead", "2019-10-16")
+  def textOf(uid: Long @@ MailUID, part: EmailBodyPart.TextPart): Stream[F, Char]
 
   /**
     * Allows to fetch textual representation of given mime part
@@ -123,7 +129,7 @@ trait IMAPClient[F[_]] {
     *               text to resulting stream of strings.
     * @return
     */
-  def textOf(uid: Long @@ MailUID, part: EmailBodyPart.TextPart): Stream[F, Char]
+  def textOfBodyPart(uid: Long @@ MailUID, part: EmailBodyPart): Stream[F, Char]
 
 }
 
@@ -203,10 +209,22 @@ object IMAPClient {
             fetchBytesOf(0, content.content, part.tpe.fields.encoding)
           }
 
+          def bytesOfBodyPart(uid: @@[Long, MailUID], part: EmailBodyPart): Stream[F, Byte] = {
+            val content = IMAPFetchContent.Body(BodySection(part.partId))
+            rawContent(request(UID(Fetch(NumericRange(uid: Long, uid: Long, 1), Seq(content))))) through
+              fetchBytesOf(0, content.content, part.encoding)
+          }
+
           def textOf(uid: @@[Long, MailUID], part: EmailBodyPart.TextPart): Stream[F, Char] = {
             val content = IMAPFetchContent.Body(BodySection(part.partId))
             rawContent(request(UID(Fetch(NumericRange(uid: Long, uid: Long, 1), Seq(content))))) through
             fetchTextOf(0, content.content, part.tpe.fields.encoding, part.charsetName)
+          }
+
+          def textOfBodyPart(uid: @@[Long, MailUID], part: EmailBodyPart): Stream[F, Char] = {
+            val content = IMAPFetchContent.Body(BodySection(part.partId))
+            rawContent(request(UID(Fetch(NumericRange(uid: Long, uid: Long, 1), Seq(content))))) through
+              fetchTextOf(0, content.content, part.encoding, part.charsetName)
           }
       }
 
