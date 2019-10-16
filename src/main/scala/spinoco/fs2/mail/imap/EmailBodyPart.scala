@@ -11,10 +11,12 @@ object EmailBodyPart {
     , tpe: BodyTypeText
     , ext: Option[SingleBodyExtension]
   ) extends  EmailBodyPart { self =>
-    def charsetName: Option[String] = {
+    val charsetName: Option[String] = {
       self.tpe.fields.params
       .collectFirst { case(key, name) if key.equalsIgnoreCase("CHARSET") => name }
     }
+
+    val encoding: String = tpe.fields.encoding
   }
 
   /** represent binary mime part body **/
@@ -22,8 +24,19 @@ object EmailBodyPart {
     partId: String
     , tpe: BodyTypeBasic
     , ext: Option[SingleBodyExtension]
-  ) extends EmailBodyPart
+  ) extends EmailBodyPart {
+    val encoding: String = tpe.fields.encoding
+    val charsetName: Option[String] = None
+  }
 
+  case class MessagePart(
+    partId: String
+    , tpe: BodyTypeMessage
+    , ext: Option[SingleBodyExtension]
+  ) extends EmailBodyPart {
+    val encoding: String = tpe.fields.encoding
+    val charsetName: Option[String] = Some("us-ascii")
+  }
 
   /** from the BodyParts extracts email body parts with their Id to be used later by fetch**/
   def flatten(body: BodyPart): Vector[EmailBodyPart] = {
@@ -34,6 +47,7 @@ object EmailBodyPart {
       tpe match {
         case text: BodyTypeText => Some(TextPart(id, text, ext))
         case bin: BodyTypeBasic => Some(BinaryPart(id, bin, ext))
+        case message: BodyTypeMessage => Some(MessagePart(id, message, ext))
         case _ => None
       }
     }
@@ -48,7 +62,7 @@ object EmailBodyPart {
             go(nextIds, multi.parts.map(Some(_)) ++ (None +: rem.tail), acc)
 
           case single: SingleBodyPart =>
-            // add to hiearachy, increment index move to next
+            // add to hierarchy, increment index move to next
             val nextIds = ids.lastOption.map(idx => ids.init :+ (idx + 1)).getOrElse(Vector(1))
             mkEmailPart(single.tpe, single.ext, nextIds) match {
               case Some(part) => go(nextIds, rem.tail, acc :+ part)
@@ -73,7 +87,11 @@ object EmailBodyPart {
 
 
 
-sealed trait EmailBodyPart
+sealed trait EmailBodyPart {
+  val partId: String
+  val charsetName: Option[String]
+  val encoding: String
+}
 
 
 
