@@ -8,7 +8,7 @@ lazy val contributors = Seq(
   , "mrauilm" -> "Milan Raulim"
 )
 
-val fs2Version = "1.0.0-M2"
+val fs2Version = "2.0.0"
 
 lazy val commonSettings = Seq(
   organization := "com.spinoco",

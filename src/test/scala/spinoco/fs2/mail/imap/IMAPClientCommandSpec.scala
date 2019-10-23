@@ -8,9 +8,12 @@ import org.scalacheck.Properties
 import org.scalacheck.Prop._
 import spinoco.fs2.mail.imap.IMAPClient.impl.{IMAPData, IMAPText}
 
+import scala.concurrent.ExecutionContext
+
 object IMAPClientCommandSpec extends Properties("IMAPClient.request") {
 
-  import scala.concurrent.ExecutionContext.Implicits.global
+  private implicit val cs = IO.contextShift(ExecutionContext.global)
+  private implicit val c = IO.ioConcurrentEffect
 
   def createTagged(shouldFail: IO[Boolean], count: Int, done: IO[Unit]): Stream[IO, IMAPData] = {
     Stream.unfoldEval(count){ s =>

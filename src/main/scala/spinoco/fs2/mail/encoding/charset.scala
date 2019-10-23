@@ -44,7 +44,7 @@ object charset {
     )) flatMap { decoder =>
 
       def go(buff: ByteVector)(s: Stream[F, Byte]): Pull[F, Char, Unit] = {
-        s.pull.unconsChunk.flatMap {
+        s.pull.uncons.flatMap {
           case Some((chunk, tail)) =>
             if (chunk.isEmpty) go(buff)(tail)
             else {
@@ -113,7 +113,7 @@ object charset {
     Stream.eval(F.delay(chs.newEncoder())) flatMap { encoder =>
 
       def go(buff: String)(s: Stream[F, Char]): Pull[F, Byte, Unit] = {
-        s.pull.unconsChunk flatMap {
+        s.pull.uncons flatMap {
           case Some((chunk, tail)) =>
             val s = buff + StringChunk.asString(chunk)
             val chb = CharBuffer.wrap(s)

@@ -22,7 +22,7 @@ object quotedPrintable {
     * @tparam F
     * @return
     */
-  def decode[F[_]]: Pipe[F, Byte, Byte] = {
+  def decode[F[_]](implicit rt: RaiseThrowable[F]): Pipe[F, Byte, Byte] = {
      @tailrec
     def decodeBV(rem: ByteVector, acc: ByteVector):Either[String, (ByteVector, ByteVector)] = {
       val eqIdx = rem.indexOfSlice(`=`)
@@ -47,7 +47,7 @@ object quotedPrintable {
 
 
     def go(buff: ByteVector)(s: Stream[F, Byte]): Pull[F, Byte, Unit] = {
-      s.pull.unconsChunk.flatMap {
+      s.pull.uncons.flatMap {
         case Some((chunk, tl)) =>
           val bs = chunk.toBytes
           val bv = buff ++ ByteVector.view(bs.values, bs.offset, bs.size)
