@@ -447,7 +447,7 @@ object IMAPClient {
       * @tparam F
       * @return
       */
-    def fetchBytesOf[F[_]](
+    def fetchBytesOf[F[_]: Sync](
       contentIdx: Int
       , contentKey: String
       , encoding: String
@@ -455,7 +455,7 @@ object IMAPClient {
 
       val decoder: Pipe[F, Byte, Byte] = { s =>
         encoding.toUpperCase match {
-          case "BASE64" => base64.decode[F](s)
+          case "BASE64" => s.through(base64.decode[F])
           case "QUOTED-PRINTABLE" => quotedPrintable.decode[F](s)
           case _ => s
         }
@@ -487,7 +487,7 @@ object IMAPClient {
 
       val decoder: Pipe[F, Byte, Char] = { s =>
         encoding.toUpperCase match {
-          case "BASE64" => base64.decode[F](s) through charset.decode(chs)
+          case "BASE64" => s.through(base64.decode[F]) through charset.decode(chs)
           case "QUOTED-PRINTABLE" => quotedPrintable.decode[F](s) through charset.decode(chs)
           case _ => s through charset.decode(chs)
         }
