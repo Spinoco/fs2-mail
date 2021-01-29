@@ -62,12 +62,16 @@ object base64 {
     // Adapted from scodec-bits, licensed under 3-clause BSD
     final case class State(buffer: Int, mod: Int, padding: Int)
     val Pad = alphabet.pad
+
+    // Fail message and the idx at which the unexpected character occurs.
+    case class UnexpectedCharacter(message: String, idx: Int) extends IllegalArgumentException(message)
+
     def paddingError =
       Left(
-        "Malformed padding - final quantum may optionally be padded with one or two padding characters such that the quantum is completed"
+        new IllegalArgumentException("Malformed padding - final quantum may optionally be padded with one or two padding characters such that the quantum is completed")
       )
 
-    def decode(state: State, str: String): Either[String, (State, Chunk[Byte])] = {
+    def decode(state: State, str: String): Either[Throwable, (State, Chunk[Byte])] = {
       var buffer = state.buffer
       var mod = state.mod
       var padding = state.padding
@@ -90,7 +94,7 @@ object base64 {
                   try alphabet.toIndex(c)
                   catch {
                     case _: IllegalArgumentException =>
-                      return Left(s"Invalid base 64 character '$c' at index $idx")
+                      return Left(new IllegalArgumentException(s"Invalid base 64 character '$c' at index $idx"))
                   }
                 }
               } else {
@@ -103,7 +107,7 @@ object base64 {
                   }
                 } else {
                   return Left(
-                    s"Unexpected character '$c' at index $idx after padding character; only '=' and whitespace characters allowed after first padding character"
+                    UnexpectedCharacter(s"Unexpected character '$c' at index $idx after padding character; only '=' and whitespace characters allowed after first padding character", idx)
                   )
                 }
               }
@@ -133,12 +137,12 @@ object base64 {
       Right((carry, out))
     }
 
-    def finish(state: State): Either[String, Chunk[Byte]] = {
+    def finish(state: State): Either[Throwable, Chunk[Byte]] = {
       if (state.padding != 0 && state.mod != 0) paddingError
       else
         state.mod match {
           case 0 => Right(Chunk.empty)
-          case 1 => Left("Final base 64 quantum had only 1 digit - must have at least 2 digits")
+          case 1 => Left(new IllegalArgumentException("Final base 64 quantum had only 1 digit - must have at least 2 digits"))
           case 2 =>
 
             Right(Chunk((state.buffer >> 4).toByte))
@@ -154,20 +158,50 @@ object base64 {
         }
     }
 
-    def go(state: State, s: Stream[F, String]): Pull[F, Byte, Unit] =
+    def go(state: State, s: Stream[F, String]): Pull[F, Byte, Unit] = {
+
+      /**
+        * In case we encounter unexpected character, split the head and try to decode as two separate base64 data.
+        *
+        * @param err    The unexpected character error.
+        * @param head   The failing string.
+        * @param tail   The rest of the stream.
+        * @param state  The current state of decoding.
+        */
+      def handleUnexpected(
+        err: UnexpectedCharacter
+        , head: String
+        , tail: Stream[F, String]
+        , state: State
+      ): Pull[F, Byte, Unit] = {
+        val (withCurrentState, next) = head.splitAt(err.idx)
+        decode(state, withCurrentState) match {
+          case Left(second) => Pull.raiseError(CompositeFailure.apply(err, second, List.empty))
+          case Right((newState, out)) =>
+            finish(newState) match {
+              case Left(second) => Pull.raiseError(CompositeFailure.apply(err, second, List.empty))
+              case Right(out2) =>
+                Pull.output(out) >>
+                Pull.output(out2) >>
+                go(State(0, 0, 0), Stream.emit(next) ++ tail)
+            }
+        }
+      }
+
       s.pull.uncons1.flatMap {
         case Some((hd, tl)) =>
           decode(state, hd) match {
-            case Right((newState, out)) =>
-              Pull.output(out) >> go(newState, tl)
-            case Left(err) => Pull.raiseError(new IllegalArgumentException(err))
+            case Right((newState, out)) => Pull.output(out) >> go(newState, tl)
+            case Left(err: UnexpectedCharacter) => handleUnexpected(err, hd, tl, state)
+            case Left(err) => Pull.raiseError(err)
           }
         case None =>
           finish(state) match {
             case Right(out) => Pull.output(out)
-            case Left(err)  => Pull.raiseError(new IllegalArgumentException(err))
+            case Left(err)  => Pull.raiseError(err)
           }
       }
+    }
 
     in => go(State(0, 0, 0), in).stream
   }
