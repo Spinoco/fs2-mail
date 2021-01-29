@@ -58,4 +58,41 @@ object base64Spec extends Properties("base64") {
 
   }
 
+
+  property("decode.base64.multiple-encoded") = forAll { sample: EncodingSample =>
+    val encoded = ByteVector.view(sample.text.getBytes).toBase64(sample.alphabet)
+
+    val source = {
+      Stream.chunk[IO, Byte](Chunk.bytes(encoded.getBytes)).covary[IO] ++
+      Stream.chunk[IO, Byte](Chunk.bytes(encoded.getBytes)).covary[IO]
+    }.bufferAll
+
+    source
+      .chunkLimit(sample.chunkSize).flatMap(ch => Stream.chunk(ch))
+      .through(base64.decodeRaw(sample.alphabet))
+      .chunks
+      .fold(ByteVector.empty)(accumulate.byteVector)
+      .map(_.decodeUtf8)
+      .compile.toVector.unsafeRunSync() ?= Vector(
+      Right(sample.text + sample.text)
+    )
+  }
+
+
+  property("decode.base64.multiple-encoded.one-line") = forAll { sample: EncodingSample =>
+    val encoded = ByteVector.view(sample.text.getBytes).toBase64(sample.alphabet)
+
+    val source = {
+      Stream.chunk[IO, Byte](Chunk.bytes((encoded+encoded).getBytes)).covary[IO]
+    }.bufferAll
+
+    source
+      .through(base64.decodeRaw(sample.alphabet))
+      .chunks
+      .fold(ByteVector.empty)(accumulate.byteVector)
+      .map(_.decodeUtf8)
+      .compile.toVector.unsafeRunSync() ?= Vector(
+      Right(sample.text + sample.text)
+    )
+  }
 }
