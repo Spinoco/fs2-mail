@@ -10,7 +10,7 @@ object IMAPCommandSpec extends Properties("IMAPCommand"){
 
   property("login") = protect{
 
-    LoginPlainText("user1", "pass1").asIMAPv4 ?= "LOGIN user1 pass1"
+    LoginPlainText("user1", "pass1").asIMAPv4 ?= "LOGIN user1 \"pass1\""
   }
 
   property("logout") = protect{
