@@ -8,7 +8,7 @@ import scala.collection.immutable.NumericRange
 object IMAPCommand {
 
   final case class LoginPlainText(user: String, pass: String) extends IMAPCommand {
-    def asIMAPv4: String = s"LOGIN $user $pass"
+    def asIMAPv4: String = s"""LOGIN $user "$pass""""
   }
 
   final case object Logout extends IMAPCommand {
