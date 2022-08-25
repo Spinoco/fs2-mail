@@ -33,7 +33,7 @@ object SMTPResponse {
     val NotImplemented = Value(502)     // Command not implemented (see Section 4.2.4)
     val BadSequence = Value(503)        // Bad sequence of commands
     val UnknownParameter = Value(504)   // Command parameter not implemented
-    val AuthFailed = Value(535)   // Command parameter not implemented
+    val InvalidCredentials = Value(535) // Authentication credentials invalid
     val MailboxNotFound = Value(550)    // Requested action not taken: mailbox unavailable (e.g., mailbox
                                         // not found, no access, or command rejected for policy reasons)
     val NotLocal = Value(551)           // User not local; please try <forward-path> (See Section 3.4)

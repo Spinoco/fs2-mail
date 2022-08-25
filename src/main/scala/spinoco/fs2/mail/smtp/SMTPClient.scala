@@ -319,7 +319,7 @@ object SMTPClient {
         Sync[F].raiseError(new Throwable(s"Unexpected response during xoauth login [$tag]: $resp"))
 
       send(command("AUTH XOAUTH2 " + spinoco.fs2.mail.internal.computeXAuth2(userName, accessToken))) flatMap { loginResult =>
-        if (! loginResult.exists(_.code == Code.AuthAccepted)) failed("token", loginResult)
+        if (!loginResult.exists(_.code == Code.AuthAccepted)) failed("token", loginResult)
         else Sync[F].unit
       }
     }
