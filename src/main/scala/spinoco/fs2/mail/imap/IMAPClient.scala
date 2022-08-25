@@ -46,6 +46,13 @@ trait IMAPClient[F[_]] {
     */
   def login(userName: String, password: String): F[IMAPResult[Seq[String]]]
 
+  /**
+    * Performs XOAUTH2 to IMAP server with supplied credentials.
+    *
+    * @param userName     The user name under which to login with the given accessToken.
+    * @param accessToken  The OAUTH access token used to login.
+    */
+  def loginXOAuth2(userName: String, accessToken: String): F[IMAPResult[Seq[String]]]
 
   /**
     * Performs LOGOUT as per RFC3501 6.1.3. Note as result of this command the connection with the
@@ -175,6 +182,9 @@ object IMAPClient {
         new IMAPClient[F] {
           def login(userName: String, password: String) =
             shortContent(request(LoginPlainText(userName, password)))(parseLogin[F])
+
+          def loginXOAuth2(userName: String, accessToken: String): F[IMAPResult[Seq[String]]] =
+            shortContent(request(LoginXOAUTH2(userName, accessToken)))(parseLogin[F])
 
           def logout =
             shortContent(request(Logout)) { _ => Applicative[F].pure(()) } as (())

@@ -5,6 +5,7 @@ import cats.effect.Concurrent
 import cats.effect.concurrent.Ref
 import cats.syntax.all._
 import fs2._
+import scodec.bits.ByteVector
 
 package object internal {
 
@@ -46,6 +47,19 @@ package object internal {
           }
         }
       }}
+  }
+
+  /**
+    * Computes the access data which are to be send with AUTH XOAUTH2 to IMAP/SMTP server.
+    *
+    * @param userName     The user name of the account under which we are trying to login.
+    * @param accessToken  The OAUTH2 access token.
+    */
+  def computeXAuth2(
+    userName: String
+    , accessToken: String
+  ): String = {
+    ByteVector.view(s"""user=${userName}\u0001auth=Bearer ${accessToken}\u0001\u0001""".getBytes("utf-8")).toBase64
   }
 
 }
