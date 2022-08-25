@@ -1,4 +1,3 @@
-import com.typesafe.sbt.pgp.PgpKeys.publishSigned
 
 val ReleaseTag = """^release/([\d\.]+a?)$""".r
 
