@@ -41,6 +41,14 @@ trait SMTPClient[F[_]] {
   /** login to SMTP server with supplied user and password. This is equivalent to AUTH LOGIN **/
   def login(userName: String, password: String): F[Unit]
 
+  /**
+    * Performs XOAUTH2 to SMTP server with supplied credentials.
+    *
+    * @param userName     The user name under which to login with the given accessToken.
+    * @param accessToken  The OAUTH access token used to login.
+    */
+  def loginXOAuth2(userName: String, accessToken: String): F[Unit]
+
   /** login to SMP server with supplied credentials. This is equivalent to AUTH PLAIN command **/
   def loginPlain(authorizationId: String, authenticationId: String, pass: String): F[Unit]
 
@@ -131,6 +139,9 @@ object SMTPClient {
 
         def login(userName: String, password: String): F[Unit] =
           impl.login(userName, password)
+
+        def loginXOAuth2(userName: String, accessToken: String): F[Unit] =
+          impl.loginXOAUTH2(userName, accessToken)
 
         def loginPlain(authorizationId: String, authenticationId: String, pass: String) =
           impl.loginPlain(authorizationId, authenticationId, pass)
@@ -295,6 +306,22 @@ object SMTPClient {
         }
       }
 
+    }
+
+    /**
+      * Performs XOAUTH2 to SMTP server with supplied credentials.
+      *
+      * @param userName     The user name under which to login with the given accessToken.
+      * @param accessToken  The OAUTH access token used to login.
+      */
+    def loginXOAUTH2[F[_]: Sync](userName: String, accessToken: String)(implicit send: Stream[F, Byte] => F[Seq[SMTPResponse]]): F[Unit] = {
+      def failed(tag: String, resp: Seq[SMTPResponse]): F[Unit] =
+        Sync[F].raiseError(new Throwable(s"Unexpected response during xoauth login [$tag]: $resp"))
+
+      send(command("AUTH XOAUTH2 " + spinoco.fs2.mail.internal.computeXAuth2(userName, accessToken))) flatMap { loginResult =>
+        if (!loginResult.exists(_.code == Code.AuthAccepted)) failed("token", loginResult)
+        else Sync[F].unit
+      }
     }
 
     def startTls[F[_] : Sync](connectResponse: Seq[String], tlsHandshake: Socket[F] => F[Socket[F]])(
