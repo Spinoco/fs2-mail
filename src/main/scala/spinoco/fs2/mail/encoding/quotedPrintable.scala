@@ -89,31 +89,18 @@ object quotedPrintable {
 
     // encodes one line spearated by crlf (hard break)
     def encodeLine(bv: ByteVector): ByteVector = {
-      @tailrec
-      def go(rem: ByteVector, acc:ByteVector, untilBreak: Long): ByteVector = {
-        if (rem.isEmpty) acc
-        else if (!isPrintable(rem.head)) {
-          if (untilBreak < 3) {
-            // we couldn't fully encode this character and softwrap
-            // reset to full line, add softwrap and continue
-            go(rem, acc ++ `=crlf`, MAX_LINE_SZ)
-          } else {
-            val encoded = `=` ++ ByteVector.view(rem.take(1).toHex(HexUppercase).getBytes)
-            go (rem.tail, acc ++ encoded, untilBreak - encoded.size)
-          }
-        } else {
-          val nextLine = rem takeWhile(isPrintable) take(untilBreak)
-          if (nextLine.size == untilBreak && (rem.size > untilBreak)) {
-            // this indicates we have yet bytes coming after this line
-            go(rem.drop(nextLine.size), acc ++ nextLine ++ `=crlf`, MAX_LINE_SZ)
-          } else if (nextLine.size == untilBreak) {
-            go(rem.drop(nextLine.size), acc ++ nextLine, MAX_LINE_SZ)
-          } else {
-            go(rem.drop(nextLine.size), acc ++ nextLine, untilBreak - nextLine.size)
-          }
-        }
+      val (result, _) = bv.foldLeft((ByteVector.empty, 0)) { case ((acc, lineChars), byte) =>
+        val toAdd =
+          if (isPrintable(byte)) ByteVector(byte)
+          else `=` ++ ByteVector.view(ByteVector(byte).toHex(HexUppercase).getBytes)
+
+        val size = toAdd.size.toInt
+
+        if (lineChars + size > MAX_LINE_SZ) (acc ++ `=crlf` ++ toAdd, size)
+        else  (acc ++ toAdd, lineChars + size)
       }
-      go(bv, ByteVector.empty, MAX_LINE_SZ)
+
+      result
     }
 
     _.through(lines.byCrLf)
