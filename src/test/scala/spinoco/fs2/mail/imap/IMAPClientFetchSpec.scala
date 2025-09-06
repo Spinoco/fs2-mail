@@ -1,6 +1,7 @@
 package spinoco.fs2.mail.imap
 
 import cats.effect.IO
+import cats.effect.unsafe.implicits.global
 import org.scalacheck._
 import org.scalacheck.Prop._
 import fs2._
@@ -106,7 +107,7 @@ object IMAPClientFetchSpec extends Properties("IMAPClient.Fetch"){
       |* 0 EXPUNGE
       |3 OK Success
       |
-      |""".stripMargin.lines.mkString("\r\n")
+      |""".stripMargin.linesIterator.mkString("\r\n")
 
   val multipleHeadersResponse =
     """* 4249 FETCH (BODY[HEADER] {4774}
@@ -277,11 +278,11 @@ object IMAPClientFetchSpec extends Properties("IMAPClient.Fetch"){
       |)
       |4 OK Success
       |
-      |""".stripMargin.lines.mkString("\r\n")
+      |""".stripMargin.linesIterator.mkString("\r\n")
 
 
   def parseFetchResponse(resp: String, chunkSz: Int): Vector[Either[String, Long]] = {
-    Stream.chunk(Chunk.bytes(resp.getBytes)).covary[IO]
+    Stream.chunk(Chunk.byteVector(ByteVector.view(resp.getBytes))).covary[IO]
     .chunkLimit(chunkSz).flatMap { ch => Stream.chunk(ch) }
     .through(IMAPClient.impl.lines)
     .mapAccumulate(None: Option[Long]) { case (bytesSz, next) => next match {
@@ -328,7 +329,7 @@ object IMAPClientFetchSpec extends Properties("IMAPClient.Fetch"){
 
   def parseFetchRawResponse(resp: String, chunkSz: Int): Vector[(Int, String, Either[String, Long])] = {
     IMAPClient.impl.rawContent[IO](Stream(Right(
-      Stream.chunk(Chunk.bytes(resp.getBytes)).covary[IO]
+      Stream.chunk(Chunk.byteVector(ByteVector.view(resp.getBytes))).covary[IO]
       .chunkLimit(chunkSz).flatMap(ch => Stream.chunk(ch))
       .through(IMAPClient.impl.lines)
     )))
@@ -380,7 +381,7 @@ object IMAPClientFetchSpec extends Properties("IMAPClient.Fetch"){
 
   def parseFetchEmailHeader(resp: String, chunkSz: Int): Vector[(Long @@ MailUID, Int)] = {
     IMAPClient.impl.rawContent[IO](Stream(Right(
-      Stream.chunk(Chunk.bytes(resp.getBytes)).covary[IO]
+      Stream.chunk(Chunk.byteVector(ByteVector.view(resp.getBytes))).covary[IO]
       .chunkLimit(chunkSz).flatMap(ch => Stream.chunk(ch))
       .through(IMAPClient.impl.lines)
     )))
@@ -420,7 +421,7 @@ object IMAPClientFetchSpec extends Properties("IMAPClient.Fetch"){
       |AAAASUVORK5CYII=)
       |10 OK Success
       |
-      |""".stripMargin.stripMargin.lines.mkString("\r\n")
+      |""".stripMargin.stripMargin.linesIterator.mkString("\r\n")
 
   val fetchBodyBytes = ByteVector.fromBase64(
     """iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAMAAAAoLQ9TAAAAPFBMVEX///+1tbWwsLCtra3////5
@@ -432,14 +433,13 @@ object IMAPClientFetchSpec extends Properties("IMAPClient.Fetch"){
 
   def decodeFetchBytes(content: String, chunkSz: Int, key: String = "BODY[2]", encoding: String = "BASE64"): ByteVector = {
     IMAPClient.impl.rawContent[IO](Stream(Right(
-      Stream.chunk(Chunk.bytes(content.getBytes)).covary[IO]
+      Stream.chunk(Chunk.byteVector(ByteVector.view(content.getBytes))).covary[IO]
         .chunkLimit(chunkSz).flatMap(ch => Stream.chunk(ch))
         .through(IMAPClient.impl.lines)
     )))
     .through(IMAPClient.impl.fetchBytesOf(0, key, encoding))
     .chunks.map { ch =>
-      val bs = ch.toBytes
-      ByteVector.view(bs.values, bs.offset, bs.size)
+      ch.toByteVector
     }
     .compile.toVector.map(_.reduceOption(_ ++ _).getOrElse(ByteVector.empty))
     .unsafeRunSync
@@ -453,12 +453,12 @@ object IMAPClientFetchSpec extends Properties("IMAPClient.Fetch"){
 
   def decodeFetchText(content: String, chunkSz: Int, key: String = "BODY[1]", encoding: String = "BASE64", charset: Option[String] = Some("UTF-8")): String = {
     IMAPClient.impl.rawContent[IO](Stream(Right(
-      Stream.chunk(Chunk.bytes(content.getBytes)).covary[IO]
+      Stream.chunk(Chunk.byteVector(ByteVector.view(content.getBytes))).covary[IO]
         .chunkLimit(chunkSz).flatMap(ch => Stream.chunk(ch))
         .through(IMAPClient.impl.lines)
     )))
     .through(IMAPClient.impl.fetchTextOf(0, key, encoding, charset))
-    .chunks.map(StringChunk.asString)
+    .chunks.map(StringChunk.asString(_))
     .compile.toVector.map(_.reduceOption(_ ++ _).getOrElse(""))
     .unsafeRunSync()
   }
@@ -470,14 +470,14 @@ object IMAPClientFetchSpec extends Properties("IMAPClient.Fetch"){
       |Please click on the link below to create your account https://accounts.restcomm.com/verify-code?code=1709-4060452b-1b01-4991-9b7e-93e98e139e9d
       |)
       |11 OK Success
-      |""".stripMargin.lines.mkString("\r\n")
+      |""".stripMargin.linesIterator.mkString("\r\n")
 
   val BodyText8BitResponse =
     """* 2077 FETCH (BODY[1] {87}
       |Jestliže se vám newsletter nezobrazil správně, klikněte prosím sem
       |Červen 2017 )
       |12 OK Success
-      |""".stripMargin.lines.mkString("\r\n")
+      |""".stripMargin.linesIterator.mkString("\r\n")
 
   val BodyTextQuotedPrintableResponse =
     """* 4249 FETCH (BODY[1] {745}
@@ -498,7 +498,7 @@ object IMAPClientFetchSpec extends Properties("IMAPClient.Fetch"){
       |">=20
       |)
       |13 OK Success
-      |""".stripMargin.lines.mkString("\r\n")
+      |""".stripMargin.linesIterator.mkString("\r\n")
 
   val BodyTextBase64Response =
     """* 3632 FETCH (BODY[1] {3112}
@@ -548,7 +548,7 @@ object IMAPClientFetchSpec extends Properties("IMAPClient.Fetch"){
       |MDZmZGMwNjliZDQ0OGE2YTI0MTFhZGU2ZGZjMzgzND4gICAgICAgICAgICAgICAgICAg
       |ICAgICAgICAgICAgICAgICAgDQoNCg==)
       |13 OK Success
-    """.stripMargin.lines.mkString("\r\n")
+    """.stripMargin.linesIterator.mkString("\r\n")
 
   val SP = " "
 
@@ -558,13 +558,13 @@ object IMAPClientFetchSpec extends Properties("IMAPClient.Fetch"){
         |
         |Please click on the link below to create your account https://accounts.restcomm.com/verify-code?code=1709-4060452b-1b01-4991-9b7e-93e98e139e9d
         |
-        |""".stripMargin.lines.mkString("\r\n")
+        |""".stripMargin.linesIterator.mkString("\r\n")
   }
 
   property("decode-fetch-bytes.8bit") = forAll(Gen.choose(1, BodyText8BitResponse.size))  { sz =>
     decodeFetchText(BodyText8BitResponse, sz, encoding = "8BIT", charset = Some("UTF-8")) ?=
       """Jestliže se vám newsletter nezobrazil správně, klikněte prosím sem
-        |Červen 2017 """.stripMargin.lines.mkString("\r\n")
+        |Červen 2017 """.stripMargin.linesIterator.mkString("\r\n")
   }
 
 
@@ -580,14 +580,14 @@ object IMAPClientFetchSpec extends Properties("IMAPClient.Fetch"){
          |<body><style type="text/css">div#emailPreHeader{ display: none !important; }</style><div id="emailPreHeader" style="mso-hide:all; visibility:hidden; opacity:0; color:transparent; mso-line-height-rule:exactly; line-height:0; font-size:0px; overflow:hidden; border-width:0; display:none !important;">ReSharper Ult. 2017.3 EAP, GoLand EAP 18, Kotlin/Native IDE Support Preview</div>$SP
          |<div style="background:#ffffff;padding:0px 0px 0px 0px;margin:0px 0px 0px 0px;font-size:14px;font-family:Arial,Helvetica,sans-serif;line-height:24px">$SP
          |
-         |""".stripMargin.lines.mkString("\r\n")
+         |""".stripMargin.linesIterator.mkString("\r\n")
   }
 
 
   property("decode-fetch-bytes.base64.text") = forAll(Gen.choose(1, BodyTextBase64Response.size))  { sz =>
 
     val r = decodeFetchText(BodyTextBase64Response, sz, encoding = "BASE64", charset = Some("UTF-8"))
-      .lines.map(_.trim).mkString("\r\n")
+      .linesIterator.map(_.trim).mkString("\r\n")
 
     val e =
       s"""
@@ -617,7 +617,7 @@ object IMAPClientFetchSpec extends Properties("IMAPClient.Fetch"){
          |
          |To unsubscribe from future emails or to update your email preferences click here <http://app.go.cloudera.com/e/sl?s=1465054361&elq=306fdc069bd448a6a2411ade6dfc3834>
          |
-         |""".stripMargin.lines.mkString("\r\n")
+         |""".stripMargin.linesIterator.mkString("\r\n")
 
 
     r ?= e

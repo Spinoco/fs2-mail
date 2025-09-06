@@ -1,6 +1,6 @@
 package spinoco.fs2.mail.encoding
 
-import fs2.Chunk.ByteVectorChunk
+import fs2.Chunk
 import fs2._
 import scodec.bits.ByteVector
 
@@ -12,20 +12,19 @@ object lines {
   /** decodes bytes in chunk of bytes by supplied separator. Last line is emitted even when not terminated by `separator` **/
   def by[F[_]](separator: ByteVector): Pipe[F, Byte, Chunk[Byte]] = {
     def go(buff: ByteVector)(s: Stream[F, Byte]): Pull[F, Chunk[Byte], Unit] = {
-      s.pull.unconsChunk.flatMap {
+      s.pull.uncons.flatMap {
         case Some((ch, tl)) =>
-          val bs = ch.toBytes
-          val data = buff ++ ByteVector.view(bs.values, bs.offset, bs.size)
+          val data = buff ++ ch.toByteVector
           val idx = data.indexOfSlice(separator)
           if (idx < 0) go(data)(tl)
           else {
             val (h, t0) = data.splitAt(idx)
-            if (t0.isEmpty) Pull.output1(ByteVectorChunk(h)) >> go(ByteVector.empty)(tl)
-            else Pull.output1(ByteVectorChunk(h)) >> go(ByteVector.empty)(Stream.chunk(ByteVectorChunk(t0.drop(separator.size))) ++ tl)
+            if (t0.isEmpty) Pull.output1(Chunk.byteVector(h)) >> go(ByteVector.empty)(tl)
+            else Pull.output1(Chunk.byteVector(h)) >> go(ByteVector.empty)(Stream.chunk(Chunk.byteVector(t0.drop(separator.size))) ++ tl)
           }
 
         case None =>
-          Pull.output1(ByteVectorChunk(buff))
+          Pull.output1(Chunk.byteVector(buff))
       }
     }
     go(ByteVector.empty)(_).stream
@@ -59,15 +58,15 @@ object lines {
           val head = bv.take(length)
           if (head.size < length) {
             if (result.nonEmpty) {
-              Pull.output(ByteVectorChunk(result)) >> go(bv)(tl)
+              Pull.output(Chunk.byteVector(result)) >> go(bv)(tl)
             } else {
               go(bv)(tl)
             }
           } else {
-            val chunks = bv.grouped(length)
+            val chunks = bv.grouped(length).toSeq
             val lastChunk = chunks.lastOption.getOrElse(ByteVector.empty)
             val chunksOut = if (lastChunk.nonEmpty) chunks.init else chunks
-            Pull.output(ByteVectorChunk(result ++ ByteVector.concat(chunksOut.map(h => prefixBytes ++ h ++ crlf)))) >> go(lastChunk)(tl)
+            Pull.output(Chunk.byteVector(result ++ ByteVector.concat(chunksOut.map(h => prefixBytes ++ h ++ crlf)))) >> go(lastChunk)(tl)
           }
         } else {
           val (head, t) = bv.splitAt(idx)
@@ -76,15 +75,14 @@ object lines {
         }
       }
 
-      s.pull.unconsChunk.flatMap {
+      s.pull.uncons.flatMap {
         case Some((ch, tl)) =>
-          val bs = ch.toBytes
-          val bv = buff ++ ByteVector.view(bs.values, bs.offset, bs.size)
+          val bv = buff ++ ch.toByteVector
           makeLines(bv)(tl)
 
         case None =>
           if (buff.isEmpty) Pull.done
-          else Pull.output(ByteVectorChunk(prefixBytes ++ buff ++ crlf))
+          else Pull.output(Chunk.byteVector(prefixBytes ++ buff ++ crlf))
       }
     }
     go(ByteVector.empty)(_).stream

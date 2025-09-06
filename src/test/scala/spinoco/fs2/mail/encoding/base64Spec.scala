@@ -1,6 +1,7 @@
 package spinoco.fs2.mail.encoding
 
 import cats.effect.IO
+import cats.effect.unsafe.implicits.global
 import fs2._
 import org.scalacheck.{Arbitrary, Gen, Properties}
 import org.scalacheck.Prop._
@@ -22,7 +23,7 @@ object base64Spec extends Properties("base64") {
 
 
   property("encodes.base64") = forAll { sample: EncodingSample =>
-    Stream.chunk[IO, Byte](Chunk.bytes(sample.text.getBytes)).covary[IO].chunkLimit(sample.chunkSize).flatMap(ch => Stream.chunk(ch))
+    Stream.chunk[IO, Byte](Chunk.byteVector(ByteVector.view(sample.text.getBytes))).covary[IO].chunkLimit(sample.chunkSize).flatMap(ch => Stream.chunk(ch))
       .through(base64.encodeRaw(sample.alphabet))
       .chunks
       .fold(ByteVector.empty)(accumulate.byteVector)
@@ -34,7 +35,7 @@ object base64Spec extends Properties("base64") {
 
   property("decodes.base64") = forAll { sample: EncodingSample =>
     val encoded = ByteVector.view(sample.text.getBytes).toBase64(sample.alphabet)
-    Stream.chunk[IO, Byte](Chunk.bytes(encoded.getBytes)).covary[IO]
+    Stream.chunk[IO, Byte](Chunk.byteVector(ByteVector.view(encoded.getBytes))).covary[IO]
       .chunkLimit(sample.chunkSize).flatMap(ch => Stream.chunk(ch))
       .through(base64.decodeRaw(sample.alphabet))
       .chunks
@@ -47,7 +48,7 @@ object base64Spec extends Properties("base64") {
 
   property("encodes.decodes.base64") =  forAll { sample: EncodingSample =>
     val r =
-      Stream.chunk[IO, Byte](Chunk.bytes(sample.text.getBytes)).covary[IO].chunkLimit(sample.chunkSize).flatMap(ch => Stream.chunk(ch))
+      Stream.chunk[IO, Byte](Chunk.byteVector(ByteVector.view(sample.text.getBytes))).covary[IO].chunkLimit(sample.chunkSize).flatMap(ch => Stream.chunk(ch))
         .through(base64.encodeRaw(sample.alphabet))
         .through(base64.decodeRaw(sample.alphabet))
         .chunks

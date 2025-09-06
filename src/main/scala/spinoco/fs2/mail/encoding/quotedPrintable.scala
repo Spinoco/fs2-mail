@@ -1,6 +1,5 @@
 package spinoco.fs2.mail.encoding
 
-import fs2.Chunk.ByteVectorChunk
 import fs2._
 import scodec.bits.Bases.Alphabets.HexUppercase
 import scodec.bits.ByteVector
@@ -22,7 +21,7 @@ object quotedPrintable {
     * @tparam F
     * @return
     */
-  def decode[F[_]]: Pipe[F, Byte, Byte] = {
+  def decode[F[_]: RaiseThrowable]: Pipe[F, Byte, Byte] = {
      @tailrec
     def decodeBV(rem: ByteVector, acc: ByteVector):Either[String, (ByteVector, ByteVector)] = {
       val eqIdx = rem.indexOfSlice(`=`)
@@ -47,21 +46,21 @@ object quotedPrintable {
 
 
     def go(buff: ByteVector)(s: Stream[F, Byte]): Pull[F, Byte, Unit] = {
-      s.pull.unconsChunk.flatMap {
+      s.pull.uncons.flatMap {
         case Some((chunk, tl)) =>
-          val bs = chunk.toBytes
-          val bv = buff ++ ByteVector.view(bs.values, bs.offset, bs.size)
+          val bs = chunk.toByteVector
+          val bv = buff ++ bs
           decodeBV(bv, ByteVector.empty) match {
             case Right((decoded, remainder)) =>
-              Pull.output(ByteVectorChunk(decoded)) >> go(remainder)(tl)
+              Pull.output(Chunk.byteVector(decoded)) >> go(remainder)(tl)
 
             case Left(err) =>
-              Pull.raiseError(new Throwable(s"Failed to decode from quotedPrintable: $err (${bv.decodeUtf8})"))
+              Pull.raiseError[F](new Throwable(s"Failed to decode from quotedPrintable: $err (${bv.decodeUtf8})"))
           }
 
         case None =>
           if (buff.isEmpty || buff == `=`) Pull.done
-          else Pull.raiseError(new Throwable(s"Unfinished bytes from quoted-printable: $buff"))
+          else Pull.raiseError[F](new Throwable(s"Unfinished bytes from quoted-printable: $buff"))
       }
     }
 
@@ -117,13 +116,10 @@ object quotedPrintable {
     }
 
     _.through(lines.byCrLf)
-    .map { ch =>
-      val bs = ch.toBytes
-      ByteVector.view(bs.values, bs.offset, bs.size)
-    }
+    .map(_.toByteVector)
     .map(encodeLine)
     .intersperse(crlf)
-    .flatMap { bv => Stream.chunk(ByteVectorChunk(bv)) }
+    .flatMap { bv => Stream.chunk(Chunk.byteVector(bv)) }
 
   }
 

@@ -4,7 +4,7 @@ import java.nio.charset._
 import java.nio.{ByteBuffer, CharBuffer}
 
 import cats.effect.Sync
-import fs2.Chunk.ByteVectorChunk
+import fs2.Chunk
 import fs2._
 import scodec.bits.ByteVector
 import spinoco.fs2.mail.interop.StringChunk
@@ -44,12 +44,11 @@ object charset {
     )) flatMap { decoder =>
 
       def go(buff: ByteVector)(s: Stream[F, Byte]): Pull[F, Char, Unit] = {
-        s.pull.unconsChunk.flatMap {
+        s.pull.uncons.flatMap {
           case Some((chunk, tail)) =>
             if (chunk.isEmpty) go(buff)(tail)
             else {
-              val bs = chunk.toBytes
-              val bv = buff ++ ByteVector.view(bs.values, bs.offset, bs.size)
+              val bv = buff ++ chunk.toByteVector
               val bb = bv.toByteBuffer
               val (result, outChunk) = impl.decodeBuff(decoder, bb, last = false)
               result match {
@@ -113,7 +112,7 @@ object charset {
     Stream.eval(F.delay(chs.newEncoder())) flatMap { encoder =>
 
       def go(buff: String)(s: Stream[F, Char]): Pull[F, Byte, Unit] = {
-        s.pull.unconsChunk flatMap {
+        s.pull.uncons flatMap {
           case Some((chunk, tail)) =>
             val s = buff + StringChunk.asString(chunk)
             val chb = CharBuffer.wrap(s)
@@ -254,7 +253,7 @@ object charset {
           case CoderResult.OVERFLOW => go(sz * 2 + 1)
           case other =>
             out.flip()
-            (other, ByteVectorChunk(ByteVector.view(out)))
+            (other, Chunk.byteVector(ByteVector.view(out)))
         }
       }
       go((encoder.maxBytesPerChar() * chars.remaining()).toInt)
@@ -277,7 +276,7 @@ object charset {
           case CoderResult.OVERFLOW => go(sz * 2 + 1)
           case other =>
             out.flip()
-            (other, ByteVectorChunk(ByteVector.view(out)))
+            (other, Chunk.byteVector(ByteVector.view(out)))
         }
       }
 

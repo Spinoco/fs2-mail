@@ -1,5 +1,3 @@
-import com.typesafe.sbt.pgp.PgpKeys.publishSigned
-
 val ReleaseTag = """^release/([\d\.]+a?)$""".r
 
 lazy val contributors = Seq(
@@ -8,12 +6,12 @@ lazy val contributors = Seq(
   , "mrauilm" -> "Milan Raulim"
 )
 
-val fs2Version = "1.0.0-M2"
+val fs2Version = "3.12.2"
 
 lazy val commonSettings = Seq(
   organization := "com.spinoco",
-  scalaVersion := "2.12.4",
-  crossScalaVersions := Seq("2.11.11", "2.12.4"),
+  scalaVersion := "2.12.20",
+  crossScalaVersions := Seq("2.12.20"),
   scalacOptions ++= Seq(
     "-feature",
     "-deprecation",
@@ -31,7 +29,7 @@ lazy val commonSettings = Seq(
   libraryDependencies ++= Seq(
     "co.fs2" %% "fs2-core" % fs2Version
     , "co.fs2" %% "fs2-io" % fs2Version
-    , "com.spinoco" %% "protocol-mail" % "0.3.17"
+    , "com.spinoco" %% "protocol-mail" % "0.5.1"
     , "com.beetstra.jutf7" % "jutf7" % "1.0.0"
     , "org.scalacheck" %% "scalacheck" % "1.13.4" % "test"
   ),

@@ -3,7 +3,7 @@ package spinoco.fs2.mail.smtp
 import java.time.{ZoneId, ZonedDateTime}
 
 import cats.effect.IO
-import fs2.Chunk.ByteVectorChunk
+import cats.effect.unsafe.implicits.global
 import fs2._
 import org.scalacheck.Prop._
 import org.scalacheck.Properties
@@ -19,7 +19,7 @@ object MIMEEncodeMultipartSpec extends Properties("MIMEEncodeMultipart") {
   val emailCodec = EmailHeaderCodec.codec(100 * 1024)
   val mimeCodec = EmailHeaderCodec.mimeCodec(10 * 1024)
 
-  val binarySample1 = Stream.chunk(ByteVectorChunk(ByteVector.view(
+  val binarySample1 = Stream.chunk(Chunk.byteVector(ByteVector.view(
     (for (i <- 0 until 1000) yield i.toByte).toArray
   )))
 
@@ -30,7 +30,7 @@ object MIMEEncodeMultipartSpec extends Properties("MIMEEncodeMultipart") {
       |. Dot starting line
       |--- end
       |
-      |""".stripMargin.lines.mkString("\r\n")
+      |""".stripMargin.linesIterator.mkString("\r\n")
   ))
 
    val htmlText = Stream.chunk(StringChunk(
@@ -40,7 +40,7 @@ object MIMEEncodeMultipartSpec extends Properties("MIMEEncodeMultipart") {
        |    <div>This contains international chars ěščřžý </div>
        |  </body>
        |</html>
-       |""".stripMargin.lines.mkString("\r\n")
+       |""".stripMargin.linesIterator.mkString("\r\n")
    ))
 
   property("alternative") = protect {
@@ -61,8 +61,7 @@ object MIMEEncodeMultipartSpec extends Properties("MIMEEncodeMultipart") {
       , mimeHeaderCodec = mimeCodec
     )
     .chunks.map { ch =>
-      val bs = ch.toBytes
-      ByteVector.view(bs.values, bs.offset, bs.size)
+      ch.toByteVector
     }
     .compile.toVector.map { _.reduce(_ ++ _).decodeUtf8.right.getOrElse("--ERR--") }
     .unsafeRunSync() ?=
@@ -99,7 +98,7 @@ object MIMEEncodeMultipartSpec extends Properties("MIMEEncodeMultipart") {
       |
       |------boundary-----
       |
-      |""".stripMargin.lines.mkString("\r\n")
+      |""".stripMargin.linesIterator.mkString("\r\n")
 
 
   }
@@ -134,8 +133,7 @@ object MIMEEncodeMultipartSpec extends Properties("MIMEEncodeMultipart") {
         , mimeHeaderCodec = mimeCodec
       )
       .chunks.map { ch =>
-        val bs = ch.toBytes
-        ByteVector.view(bs.values, bs.offset, bs.size)
+        ch.toByteVector
       }
       .compile.toVector.map { _.reduce(_ ++ _).decodeUtf8.right.getOrElse("--ERR--") }
       .unsafeRunSync() ?=
@@ -205,7 +203,7 @@ object MIMEEncodeMultipartSpec extends Properties("MIMEEncodeMultipart") {
         |
         |-----mixed-boundary-----
         |
-        |""".stripMargin.lines.mkString("\r\n")
+        |""".stripMargin.linesIterator.mkString("\r\n")
   }
 
 }

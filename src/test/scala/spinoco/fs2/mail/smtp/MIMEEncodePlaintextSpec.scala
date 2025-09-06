@@ -4,10 +4,10 @@ import java.nio.charset.Charset
 import java.time.{ZoneId, ZonedDateTime}
 
 import cats.effect.IO
+import cats.effect.unsafe.implicits.global
 import fs2._
 import org.scalacheck.Properties
 import org.scalacheck.Prop._
-import scodec.bits.ByteVector
 
 import spinoco.fs2.mail.interop.StringChunk
 import spinoco.protocol.mail.{EmailAddress, EmailHeader}
@@ -27,7 +27,7 @@ object MIMEEncodePlaintextSpec extends Properties("MIMEEncodePlaintext") {
       |. Dot starting line
       |--- end
       |
-      """.stripMargin.lines.mkString("\r\n")
+      """.stripMargin.linesIterator.mkString("\r\n")
   )).covary[IO]
 
   property("defaults") = protect {
@@ -44,8 +44,7 @@ object MIMEEncodePlaintextSpec extends Properties("MIMEEncodePlaintext") {
       , mimeHeaderCodec = mimeCodec
     )
     .chunks.map { ch =>
-      val bs = ch.toBytes
-      ByteVector.view(bs.values, bs.offset, bs.size)
+      ch.toByteVector
     }
     .compile.toVector.map { _.reduce(_ ++ _).decodeUtf8.right.getOrElse("--ERR--") }
     .unsafeRunSync() ?=
@@ -64,7 +63,7 @@ object MIMEEncodePlaintextSpec extends Properties("MIMEEncodePlaintext") {
         |. Dot starting line
         |--- end
         |
-      """.stripMargin.lines.mkString("\r\n")
+      """.stripMargin.linesIterator.mkString("\r\n")
 
   }
 
@@ -83,8 +82,7 @@ object MIMEEncodePlaintextSpec extends Properties("MIMEEncodePlaintext") {
       , mimeHeaderCodec = mimeCodec
     )
       .chunks.map { ch =>
-        val bs = ch.toBytes
-        ByteVector.view(bs.values, bs.offset, bs.size)
+        ch.toByteVector
       }
       .compile.toVector.map { _.reduce(_ ++ _).decodeUtf8.right.getOrElse("--ERR--") }
       .unsafeRunSync() ?=
@@ -103,7 +101,7 @@ object MIMEEncodePlaintextSpec extends Properties("MIMEEncodePlaintext") {
         |. Dot starting line
         |--- end
         |
-      """.stripMargin.lines.mkString("\r\n")
+      """.stripMargin.linesIterator.mkString("\r\n")
   }
 
   property("specified.transfer-encoding") = protect {
@@ -120,8 +118,7 @@ object MIMEEncodePlaintextSpec extends Properties("MIMEEncodePlaintext") {
       , mimeHeaderCodec = mimeCodec
     )
     .chunks.map { ch =>
-      val bs = ch.toBytes
-      ByteVector.view(bs.values, bs.offset, bs.size)
+      ch.toByteVector
     }
     .compile.toVector.map { _.reduce(_ ++ _).decodeUtf8.right.getOrElse("--ERR--") }
     .unsafeRunSync() ?=
@@ -139,7 +136,7 @@ object MIMEEncodePlaintextSpec extends Properties("MIMEEncodePlaintext") {
       |  aGF0IHNoYWxsIGJlIGVuY29kZWQNCi4gRG90IHN0YXJ0aW5nIGxpbmUNCi0tLSBlbmQNCg0KI
       |  CAgICAg
       |
-      |""".stripMargin.lines.mkString("\r\n")
+      |""".stripMargin.linesIterator.mkString("\r\n")
   }
 
 }

@@ -3,7 +3,7 @@ package spinoco.fs2.mail.encoding
 import java.nio.charset.{Charset, StandardCharsets}
 
 import cats.effect.IO
-import fs2.Chunk.ByteVectorChunk
+import cats.effect.unsafe.implicits.global
 import fs2._
 import org.scalacheck.Prop._
 import org.scalacheck.{Gen, Properties}
@@ -59,7 +59,7 @@ object charsetSpec extends Properties("charset") {
     val encodedExpect = ByteVector.view(s.getBytes(chs))
 
     val decoded =
-      Stream.chunk(ByteVectorChunk(encodedExpect)).covary[IO]
+      Stream.chunk(Chunk.byteVector(encodedExpect)).covary[IO]
         .chunkLimit(sz).flatMap(ch => Stream.chunk(ch))
         .through(charset.decode(chs))
         .through(charset.stringChunks)
@@ -71,10 +71,8 @@ object charsetSpec extends Properties("charset") {
       .through(charset.charStream)
       .chunkLimit(sz).flatMap(ch => Stream.chunk(ch))
       .through(charset.encode(chs))
-      .chunks.map { ch =>
-        val bs = ch.toBytes
-        ByteVector.view(bs.values, bs.offset, bs.size)
-      }
+      .chunks
+      .map(_.toByteVector)
       .compile.toVector.map { v => ByteVector.view(new String(v.reduceOption( _ ++ _).getOrElse(ByteVector.empty).toArray, chs).getBytes(chs))  }
       .unsafeRunSync()
 

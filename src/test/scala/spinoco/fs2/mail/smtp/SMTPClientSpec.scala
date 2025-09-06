@@ -1,7 +1,7 @@
 package spinoco.fs2.mail.smtp
 
 import cats.effect.IO
-import fs2.Chunk.ByteVectorChunk
+import cats.effect.unsafe.implicits.global
 import fs2._
 import org.scalacheck.Prop._
 import org.scalacheck._
@@ -14,38 +14,37 @@ object SMTPClientSpec extends Properties("SMTPClient"){
 
   property("insert-dots") = forAll(Gen.choose(1, 40)) { (chunkSize: Int) =>
 
-    Stream.chunk(ByteVectorChunk(ByteVector.view(
+    Stream.chunk(Chunk.byteVector(ByteVector.view(
       """Line
         |.
         | .
         |x.
         |......
-      """.stripMargin.lines.mkString("\r\n").getBytes))
+      """.stripMargin.linesIterator.mkString("\r\n").getBytes))
     ).covary[IO]
     .chunkLimit(chunkSize).flatMap(ch => Stream.chunk(ch))
     .through(SMTPClient.impl.insertDotIfNeeded)
     .chunks.map { ch =>
-      val bs = ch.toBytes
-      ByteVector.view(bs.values, bs.offset, bs.size)
+      ch.toByteVector
     }
     .compile.toVector
-    .map(_.reduce(_ ++ _).decodeUtf8.right.toOption.getOrElse("").lines.mkString("\r\n"))
+    .map(_.reduce(_ ++ _).decodeUtf8.right.toOption.getOrElse("").linesIterator.mkString("\r\n"))
     .unsafeRunSync() ?=
       """Line
         |..
         | .
         |x.
         |.......
-      """.stripMargin.lines.mkString("\r\n")
+      """.stripMargin.linesIterator.mkString("\r\n")
   }
 
 
   property("read-response.single-line") = forAll(Gen.choose(1, 200)) { (chunkSize: Int) =>
 
-    Stream.chunk(ByteVectorChunk(ByteVector.view(
+    Stream.chunk(Chunk.byteVector(ByteVector.view(
       """220 smtp.gmail.com ESMTP k185sm1251101wma.28 - gsmtp
         |
-      """.stripMargin.lines.mkString("\r\n").getBytes
+      """.stripMargin.linesIterator.mkString("\r\n").getBytes
     ))).covary[IO]
     .chunkLimit(chunkSize).flatMap(ch => Stream.chunk(ch))
     .through(SMTPClient.impl.readResponse[IO])
@@ -56,7 +55,7 @@ object SMTPClientSpec extends Properties("SMTPClient"){
 
   property("read-response.multi-line") = forAll(Gen.choose(1, 200)) { (chunkSize: Int) =>
 
-    Stream.chunk(ByteVectorChunk(ByteVector.view(
+    Stream.chunk(Chunk.byteVector(ByteVector.view(
       """250-smtp.gmail.com at your service, [31.186.185.166]
         |250-SIZE 35882577
         |250-8BITMIME
@@ -66,7 +65,7 @@ object SMTPClientSpec extends Properties("SMTPClient"){
         |250-CHUNKING
         |250 SMTPUTF8
         |
-      """.stripMargin.lines.mkString("\r\n").getBytes
+      """.stripMargin.linesIterator.mkString("\r\n").getBytes
     ))).covary[IO]
       .chunkLimit(chunkSize).flatMap(ch => Stream.chunk(ch))
       .through(SMTPClient.impl.readResponse[IO])

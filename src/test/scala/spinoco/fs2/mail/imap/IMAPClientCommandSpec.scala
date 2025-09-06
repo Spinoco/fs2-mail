@@ -1,16 +1,15 @@
 package spinoco.fs2.mail.imap
 
 import cats.effect.IO
-import cats.effect.concurrent.{Ref, Semaphore}
+import cats.effect.{Ref}
+import cats.effect.std.Semaphore
 import fs2._
-import cats.syntax.all._
 import org.scalacheck.Properties
 import org.scalacheck.Prop._
 import spinoco.fs2.mail.imap.IMAPClient.impl.{IMAPData, IMAPText}
 
 object IMAPClientCommandSpec extends Properties("IMAPClient.request") {
 
-  import scala.concurrent.ExecutionContext.Implicits.global
 
   def createTagged(shouldFail: IO[Boolean], count: Int, done: IO[Unit]): Stream[IO, IMAPData] = {
     Stream.unfoldEval(count){ s =>
@@ -23,8 +22,9 @@ object IMAPClientCommandSpec extends Properties("IMAPClient.request") {
   }
 
   property("cmd.release.after.drain") = protect{
-    val (drained, result) =
-      Ref.of[IO, Long](1l).flatMap { idxRef =>
+    val (drained, result) = {
+      import cats.effect.unsafe.implicits.global
+      (Ref.of[IO, Long](1l).flatMap { idxRef =>
       Ref.of[IO, Boolean](false).flatMap{ drainedRef =>
       Semaphore[IO](1).flatMap{ gate =>
 
@@ -36,9 +36,10 @@ object IMAPClientCommandSpec extends Properties("IMAPClient.request") {
         }.take(2).compile.toVector.flatMap { result =>
           drainedRef.get.map(_ -> result)
         }
-      }}}.unsafeRunSync()
+      }}}).unsafeRunSync()
+    }
 
-      (result ?= Vector(IMAPText("* 3"), IMAPText("* 2"))) && drained
+      (result ?= Vector(IMAPText("* 3"), IMAPText("* 2"))) && (drained ?= true)
     }
 
 }

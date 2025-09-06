@@ -1,9 +1,11 @@
 package spinoco.fs2.mail.encoding
 
 import cats.effect.IO
+import cats.effect.unsafe.implicits.global
 import fs2._
 import org.scalacheck.{Gen, Prop, Properties}
 import org.scalacheck.Prop._
+import scodec.bits.ByteVector
 
 object quotedPrintableSpec extends Properties("quotedPrintable") {
 
@@ -12,19 +14,19 @@ object quotedPrintableSpec extends Properties("quotedPrintable") {
     val toEncode = raw.mkString("\r\n")
 
     val decoded =
-      Stream.chunk(Chunk.bytes(toDecode.getBytes)).covary[IO]
+      Stream.chunk(Chunk.byteVector(ByteVector.view(toDecode.getBytes))).covary[IO]
       .chunkLimit(chunkSize).flatMap(ch => Stream.chunk(ch))
       .through(quotedPrintable.decode)
-      .through(text.utf8Decode)
+      .through(text.utf8.decode)
       .through(text.lines)
       .compile.toVector
       .unsafeRunSync()
 
     val encoded =
-      Stream.chunk(Chunk.bytes(toEncode.getBytes)).covary[IO]
+      Stream.chunk(Chunk.byteVector(ByteVector.view(toEncode.getBytes))).covary[IO]
       .chunkLimit(chunkSize).flatMap(ch => Stream.chunk(ch))
       .through(quotedPrintable.encode)
-      .through(text.utf8Decode)
+      .through(text.utf8.decode)
       .through(text.lines)
       .compile.toVector
       .unsafeRunSync()
@@ -53,7 +55,7 @@ object quotedPrintableSpec extends Properties("quotedPrintable") {
           |un moyen, et te trompant ainsi sur la route =C3=A0 suivre les voil=C3=A0 bi=
           |ent=C3=B4t qui te d=C3=A9gradent, car si leur musique est vulgaire ils te f=
           |abriquent pour te la vendre une =C3=A2me vulgaire."""
-          .stripMargin.lines.toSeq
+          .stripMargin.linesIterator.toSeq
       , raw = Seq(
         """J'interdis aux marchands de vanter trop leur marchandises. Car ils se font vite pédagogues et t'enseignent comme but ce qui n'est par essence qu'un moyen, et te trompant ainsi sur la route à suivre les voilà bientôt qui te dégradent, car si leur musique est vulgaire ils te fabriquent pour te la vendre une âme vulgaire."""
       )
@@ -86,7 +88,7 @@ object quotedPrintableSpec extends Properties("quotedPrintable") {
           |in
           |wenig aufschieben, denn auch uns f=C3=BCrchten, wie ihr seht, einige Tiere,
           |welche also wohl noch ungl=C3=BCcklicher sein m=C3=BCssen als wir.""""
-          .stripMargin.lines.toSeq
+          .stripMargin.linesIterator.toSeq
       , raw = Seq(
         "Die Hasen und die Frösche"
         , ""
