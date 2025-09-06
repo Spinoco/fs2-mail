@@ -50,12 +50,12 @@ object IMAPCommandSpec extends Properties("IMAPCommand"){
 
   property("fetch.exact") = protect{
 
-    Fetch(1l to 1l, Nil).asIMAPv4 ?= "FETCH 1 ()"
+    Fetch(1L to 1L, Nil).asIMAPv4 ?= "FETCH 1 ()"
   }
 
   property("fetch.range") = protect{
 
-    Fetch(1l to 10l, Nil).asIMAPv4 ?= "FETCH 1:10 ()"
+    Fetch(1L to 10L, Nil).asIMAPv4 ?= "FETCH 1:10 ()"
   }
 
 }

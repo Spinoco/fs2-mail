@@ -63,7 +63,7 @@ object MIMEEncodeMultipartSpec extends Properties("MIMEEncodeMultipart") {
     .chunks.map { ch =>
       ch.toByteVector
     }
-    .compile.toVector.map { _.reduce(_ ++ _).decodeUtf8.right.getOrElse("--ERR--") }
+    .compile.toVector.map { _.reduce(_ ++ _).decodeUtf8.getOrElse("--ERR--") }
     .unsafeRunSync() ?=
     """Subject: Test Email
       |Date: Tue, 12 Dec 2017 07:32:10 +0000
@@ -135,7 +135,7 @@ object MIMEEncodeMultipartSpec extends Properties("MIMEEncodeMultipart") {
       .chunks.map { ch =>
         ch.toByteVector
       }
-      .compile.toVector.map { _.reduce(_ ++ _).decodeUtf8.right.getOrElse("--ERR--") }
+      .compile.toVector.map { _.reduce(_ ++ _).decodeUtf8.getOrElse("--ERR--") }
       .unsafeRunSync() ?=
       """Subject: Test Email
         |Date: Tue, 12 Dec 2017 07:32:10 +0000

@@ -12,7 +12,7 @@ jobs:
     
     strategy:
       matrix:
-        scala: [2.12.20]
+        scala: [2.12.20, 2.13.16]
         java: [8, 11, 17, 21]
     
     steps:
@@ -43,7 +43,7 @@ jobs:
           ${{ runner.os }}-sbt-
           
     - name: Compile
-      run: sbt compile
+      run: sbt ++${{ matrix.scala }} compile
       
     - name: Run tests
-      run: sbt test
+      run: sbt ++${{ matrix.scala }} test

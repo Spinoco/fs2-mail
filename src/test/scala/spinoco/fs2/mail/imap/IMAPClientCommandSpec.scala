@@ -24,7 +24,7 @@ object IMAPClientCommandSpec extends Properties("IMAPClient.request") {
   property("cmd.release.after.drain") = protect{
     val (drained, result) = {
       import cats.effect.unsafe.implicits.global
-      (Ref.of[IO, Long](1l).flatMap { idxRef =>
+      (Ref.of[IO, Long](1L).flatMap { idxRef =>
       Ref.of[IO, Boolean](false).flatMap{ drainedRef =>
       Semaphore[IO](1).flatMap{ gate =>
 

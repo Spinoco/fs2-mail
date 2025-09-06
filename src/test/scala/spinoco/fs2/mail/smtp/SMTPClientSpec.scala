@@ -28,7 +28,7 @@ object SMTPClientSpec extends Properties("SMTPClient"){
       ch.toByteVector
     }
     .compile.toVector
-    .map(_.reduce(_ ++ _).decodeUtf8.right.toOption.getOrElse("").linesIterator.mkString("\r\n"))
+    .map(_.reduce(_ ++ _).decodeUtf8.toOption.getOrElse("").linesIterator.mkString("\r\n"))
     .unsafeRunSync() ?=
       """Line
         |..

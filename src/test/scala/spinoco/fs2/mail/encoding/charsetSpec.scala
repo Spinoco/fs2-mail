@@ -31,7 +31,7 @@ object charsetSpec extends Properties("charset") {
         , """気始画立詳装英天膨司島上人好購団新出定織。貨北学川速次間太千禁与貴午取場事協名写安。内虫熱開河捨西望質間質府。安級議合写禁不渉時充段逮投所予椅北。用手読険表小界私苗除誌国車現点都深情済。着科点熱子月法橋第張務企門抗事多努格倍流。及知出小町東音就加明士曲変生触供入何。月登少省約育画供帰衛説初不漁朝表図"""
         , """人ねほ打勇コツ町2発ヨ福定ほよレぽ線深 メモ発新ぞすッよ力年クネツ免激監くずぶ だ確毎問す采箱ト聞発ヱ速続イえ写敬 抗ラわとぽ。機ょほえい額社 ホチ混藤ユクオヨ視夫くやご多用 みクれえ院告マ題余へ応体関ヌ当円イサ刻種名ウヌホ職属ホリヘ昇珍望ヒ奈1立わぼ舎冒培ラ。報妨ンま上64唆2案クケ番造提食ーび順検ぶでまび初場てク論70令ぱクどね月旬ぎ童気オノ合害阪給固かも"""
         , """As Halm Himmel jeitzt rou, dé laanscht schaddreg nun. Fir vu alles d'Mier d'Welt. Frou eraus hinnen de dén. Sin fu jéngt gudden Poufank, iech wuel Fläiß fu den, et dir sinn Frot"""
-      ).mkString ++ eightBitWordBase).toCharArray.toList
+      ).mkString + eightBitWordBase.mkString).toCharArray.toList
 
     val charsets = List(
       StandardCharsets.UTF_8

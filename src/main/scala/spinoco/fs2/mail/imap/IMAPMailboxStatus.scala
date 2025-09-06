@@ -111,8 +111,8 @@ object  IMAPMailboxStatus {
     val applyExists = applyPattern(patternExists, lensExists) { s => Try(Integer.parseInt(s)).toOption } tupled
     val applyRecent = applyPattern(patternRecent, lensRecent) { s => Try(Integer.parseInt(s)).toOption } tupled
     val applyUnseen = applyPattern(patternUnseen, lensUnseen) { s => Try(Integer.parseInt(s)).toOption.map(Some(_)) } tupled
-    val applyFlags = applyPattern(patternFlags, lensFlags) { s => Some(s.split("\\s")) } tupled
-    val applyPermanentFlags = applyPattern(patternPermanentFlags, lensPermanentFlags) { s => Some(s.split("\\s")) } tupled
+    val applyFlags = applyPattern(patternFlags, lensFlags) { s => Some(s.split("\\s").toSeq) } tupled
+    val applyPermanentFlags = applyPattern(patternPermanentFlags, lensPermanentFlags) { s => Some(s.split("\\s").toSeq) } tupled
     val applyUidNext = applyPattern(patternUidNext, lensUidNext) { s => Try(java.lang.Long.parseLong(s)).toOption map { l => tag[MailUID](l)} } tupled
     val applyUidValidity = applyPattern(patternUidValidity, lensUidValidity) { s => Try(java.lang.Long.parseLong(s)).toOption.map(Some(_)) } tupled
 
@@ -128,7 +128,7 @@ object  IMAPMailboxStatus {
     lines =>
 
       parser((
-        IMAPMailboxStatus(Nil, Nil, 0, 0, None, tag[MailUID](0l), None)
+        IMAPMailboxStatus(Nil, Nil, 0, 0, None, tag[MailUID](0L), None)
         , lines
       ))._1
 

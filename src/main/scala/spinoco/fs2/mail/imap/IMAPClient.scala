@@ -151,7 +151,7 @@ object IMAPClient {
   ): Stream[F, IMAPClient[F]] = {
     import impl._
 
-    Stream.eval(Ref.of[F, Long](0l)) flatMap { idxRef =>
+    Stream.eval(Ref.of[F, Long](0L)) flatMap { idxRef =>
     Stream.eval(Semaphore[F](0)) flatMap { requestSemaphore =>
 
       def readIncoming: Stream[F, IMAPData] = {
@@ -550,8 +550,8 @@ object IMAPClient {
       }
 
       def getUid(m: Map[String, Vector[IMAPData]]): Either[String, Long @@ MailUID] = {
-        m.get("UID").map(Right(_)).getOrElse(Left("Missing UID key")).right flatMap { data =>
-        asString(data).right flatMap { uidStr =>
+        m.get("UID").map(Right(_)).getOrElse(Left("Missing UID key")) flatMap { data =>
+        asString(data) flatMap { uidStr =>
           Try(java.lang.Long.parseLong(uidStr)).map { tag[MailUID](_)  } match {
             case Success(id) => Right(id)
             case Failure(err) => Left(s"Failed to parse int: $uidStr (${err.getMessage}")
@@ -568,8 +568,8 @@ object IMAPClient {
       }
 
       def getHeader(m: Map[String, Vector[IMAPData]]): Either[String, EmailHeader] = {
-        m.get("BODY[HEADER]").map(Right(_)).getOrElse(Left("Missing BODY[HEADER] key")).right flatMap { data =>
-          asBytes(data).right.flatMap { hdrBytes =>
+        m.get("BODY[HEADER]").map(Right(_)).getOrElse(Left("Missing BODY[HEADER] key")) flatMap { data =>
+          asBytes(data).flatMap { hdrBytes =>
             headerCodec.decodeValue(hdrBytes.bits).toEither.left.map(_.messageWithContext)
           }.left.flatMap(asNilHeader(data, _))
         }
@@ -578,8 +578,8 @@ object IMAPClient {
       _ map { m =>
         (
           for {
-            uid <- getUid(m).right
-            header <- getHeader(m).right
+            uid <- getUid(m)
+            header <- getHeader(m)
           } yield IMAPEmailHeader(header, uid)
         ).left.map(err => new Throwable(s"Invalid data for email: $err  ($m)"))
       } flatMap {

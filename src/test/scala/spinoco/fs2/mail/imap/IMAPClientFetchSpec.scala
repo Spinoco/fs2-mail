@@ -364,10 +364,10 @@ object IMAPClientFetchSpec extends Properties("IMAPClient.Fetch"){
 
   property("decode-fetch-raw-content-multiple") = forAll(Gen.choose(1, multipleHeadersResponse.size))  { sz =>
     parseFetchRawResponse(multipleHeadersResponse, sz) ?= Vector(
-      (0, "BODY[HEADER]", Right(4774l))
+      (0, "BODY[HEADER]", Right(4774L))
       , (0, "UID", Left("4267"))
       , (1, "UID", Left("4268"))
-      , (1, "BODY[HEADER]", Right(5042l))
+      , (1, "BODY[HEADER]", Right(5042L))
     )
   }
 
@@ -394,20 +394,20 @@ object IMAPClientFetchSpec extends Properties("IMAPClient.Fetch"){
 
   property("decode-fetch-email-header") = forAll(Gen.choose(1, headerSingleResponse.size))  { sz =>
     parseFetchEmailHeader(headerSingleResponse, sz) ?= Vector(
-      tag[MailUID](4268l) -> 26
+      tag[MailUID](4268L) -> 26
     )
   }
 
   property("decode-fetch-email-header-multiple") =  forAll(Gen.choose(1, multipleHeadersResponse.size))  { sz =>
     parseFetchEmailHeader(multipleHeadersResponse, sz) ?= Vector(
-      tag[MailUID](4267l) -> 29
-      , tag[MailUID](4268l) -> 26
+      tag[MailUID](4267L) -> 29
+      , tag[MailUID](4268L) -> 26
     )
   }
 
   property("decode-fetch-email-header-empty") = protect {
     parseFetchEmailHeader(emptyHeaderResponse, 1024) ?= Vector(
-      tag[MailUID](16578604l) -> 0
+      tag[MailUID](16578604L) -> 0
     )
   }
 
@@ -442,7 +442,7 @@ object IMAPClientFetchSpec extends Properties("IMAPClient.Fetch"){
       ch.toByteVector
     }
     .compile.toVector.map(_.reduceOption(_ ++ _).getOrElse(ByteVector.empty))
-    .unsafeRunSync
+    .unsafeRunSync()
   }
 
 
