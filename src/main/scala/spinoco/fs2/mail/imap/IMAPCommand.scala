@@ -8,7 +8,13 @@ import scala.collection.immutable.NumericRange
 object IMAPCommand {
 
   final case class LoginPlainText(user: String, pass: String) extends IMAPCommand {
-    def asIMAPv4: String = s"LOGIN $user $pass"
+    def asIMAPv4: String = s"""LOGIN $user "$pass""""
+  }
+
+  final case class LoginXOAUTH2(userName: String, accessToken: String) extends IMAPCommand {
+    override def asIMAPv4: String = {
+      s"""AUTHENTICATE XOAUTH2 ${spinoco.fs2.mail.internal.computeXAuth2(userName, accessToken)}"""
+    }
   }
 
   final case object Logout extends IMAPCommand {

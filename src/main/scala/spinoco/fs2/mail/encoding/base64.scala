@@ -1,47 +1,21 @@
 package spinoco.fs2.mail.encoding
 
-import fs2.{Chunk, _}
+import java.nio.{Buffer, CharBuffer}
+
+import cats.effect.Sync
+import fs2._
 import scodec.bits.Bases.{Alphabets, Base64Alphabet}
-import scodec.bits.{BitVector, ByteVector}
+import scodec.bits.{Bases, ByteVector}
+import spinoco.fs2.mail.interop
+import spinoco.fs2.mail.interop.StringChunk
 
 
 object base64 {
 
-  /**
-    * Encodes bytes to base64 encoded bytes [[http://tools.ietf.org/html/rfc4648#section-5 RF4648 section 5]]
-    * Encoding is done lazily to support large Base64 bodies i.e. email, attachments..)
-    * @param alphabet   Alphabet to use
-    * @return
-    */
-  def encodeRaw[F[_]](alphabet:Base64Alphabet):Pipe[F, Byte, Byte] = {
-    def go(rem:ByteVector)(s: Stream[F,Byte]):Pull[F, Byte, Unit] = {
-      s.pull.uncons.flatMap {
-        case None =>
-          if (rem.size == 0) Pull.done
-          else Pull.output(Chunk.byteVector(ByteVector.view(rem.toBase64(alphabet).getBytes)))
-
-        case Some((chunk, h)) =>
-          val bs = chunk.toByteVector
-          val n = rem ++ bs
-          if (n.size/3 > 0) {
-            val pad = n.size % 3
-            val enc = n.dropRight(pad)
-            val out = Array.ofDim[Byte]((enc.size.toInt / 3) * 4)
-            var pos = 0
-            enc.toBitVector.grouped(6) foreach { group =>
-              val idx = group.padTo(8).shiftRight(2, signExtension = false).toByteVector.head
-              out(pos) = alphabet.toChar(idx).toByte
-              pos = pos + 1
-            }
-            Pull.output(Chunk.byteVector(ByteVector.view(out))) >> go(n.takeRight(pad))(h)
-          } else {
-            go(n)(h)
-          }
-
-      }
-
-    }
-    go(ByteVector.empty)(_).stream
+  def encodeRaw[F[_]](alphabet: Base64Alphabet):Pipe[F, Byte, Byte] = { source =>
+    source
+    .through(base64Encode[F](alphabet))
+    .flatMap(s => Stream.chunk(Chunk.bytes(s.getBytes)))
   }
 
   /** encodes base64 encoded stream [[http://tools.ietf.org/html/rfc4648#section-5 RF4648 section 5]]. Whitespaces are ignored **/
@@ -52,60 +26,270 @@ object base64 {
   def encode[F[_]]: Pipe[F, Byte, Byte] =
     encodeRaw[F](Alphabets.Base64)
 
+  def decodeRaw[F[_]: Sync](alphabet:Base64Alphabet):Pipe[F, Byte, Byte]  = { source =>
+    source
+    .through(charset.decodeUTF8[F])
+    .chunks
+    .map(StringChunk.asString)
+    .through(base64Decode(alphabet))
+  }
 
+  def decodeUrl[F[_]: Sync]:Pipe[F, Byte, Byte] =
+    decodeRaw(Alphabets.Base64Url)
+
+  def decode[F[_]: Sync]:Pipe[F, Byte, Byte] =
+    decodeRaw(Alphabets.Base64)
+
+  // Taken from fs2 upstream, until we migrate to newest fs2 we need correct encode / decode
 
   /**
-    * Decodes base64 encoded stream with supplied alphabet. Whitespaces are ignored.
-    * Decoding is lazy to support very large Base64 bodies (i.e. email)
+    * Converts a stream of base 64 text in to a stream of bytes.
+    *
+    * If the text is not valid base 64, the pipe fails with an exception. Padding
+    * characters at the end of the input stream are optional, but if present, must
+    * be valid per the base 64 specification. Whitespace characters are ignored.
+    *
+    * The default base 64 alphabet is used by this pipe.
     */
-  def decodeRaw[F[_] : RaiseThrowable](alphabet:Base64Alphabet):Pipe[F, Byte, Byte] = {
+  def base64Decode[F[_]]: Pipe[F, String, Byte] =
+    base64Decode(Bases.Alphabets.Base64)
+
+  /**
+    * Like [[base64Decode]] but takes a base 64 alphabet. For example,
+    * `base64Decode(Bases.Alphabets.Base64Url)` will decode URL compatible base 64.
+    */
+  def base64Decode[F[_]](alphabet: Bases.Base64Alphabet): Pipe[F, String, Byte] = {
+    // Adapted from scodec-bits, licensed under 3-clause BSD
+    final case class State(buffer: Int, mod: Int, padding: Int)
     val Pad = alphabet.pad
-    def go(remAcc:BitVector)(s:Stream[F, Byte]):Pull[F, Byte, Unit] = {
-      s.pull.uncons.flatMap {
-        case None => Pull.done
 
-        case Some((chunk,tl)) =>
-          val bs = chunk.toByteVector
-          val bv = bs
-          var acc = remAcc
-          var idx = 0
-          var term = false
-          try {
-            bv.foreach  { b =>
-              b.toChar match {
-                case c if alphabet.ignore(c) => // ignore no-op
-                case Pad => term = true
-                case c =>
-                  if (!term) acc = acc ++ BitVector(alphabet.toIndex(c)).drop(2)
-                  else {
-                    throw new IllegalArgumentException(s"Unexpected character '$c' at index $idx after padding character; only '=' and whitespace characters allowed after first padding character")
+    // Fail message and the idx at which the unexpected character occurs.
+    case class UnexpectedCharacter(message: String, idx: Int) extends IllegalArgumentException(message)
+
+    def paddingError =
+      Left(
+        new IllegalArgumentException("Malformed padding - final quantum may optionally be padded with one or two padding characters such that the quantum is completed")
+      )
+
+    def decode(state: State, str: String): Either[Throwable, (State, Chunk[Byte])] = {
+      var buffer = state.buffer
+      var mod = state.mod
+      var padding = state.padding
+      var idx, bidx = 0
+      val acc = new Array[Byte]((str.size + 3) / 4 * 3)
+      while (idx < str.length) {
+        str(idx) match {
+          case c if alphabet.ignore(c) => // ignore
+          case c =>
+            val cidx = {
+              if (padding == 0) {
+                if (c == Pad) {
+                  if (mod == 2 || mod == 3) {
+                    padding += 1
+                    0
+                  } else {
+                    return paddingError
                   }
+                } else {
+                  try alphabet.toIndex(c)
+                  catch {
+                    case _: IllegalArgumentException =>
+                      return Left(new IllegalArgumentException(s"Invalid base 64 character '$c' at index $idx"))
+                  }
+                }
+              } else {
+                if (c == Pad) {
+                  if (padding == 1 && mod == 3) {
+                    padding += 1
+                    0
+                  } else {
+                    return paddingError
+                  }
+                } else {
+                  return Left(
+                    UnexpectedCharacter(s"Unexpected character '$c' at index $idx after padding character; only '=' and whitespace characters allowed after first padding character", idx)
+                  )
+                }
               }
-              idx = idx + 1
             }
-            val aligned = (acc.size / 8) * 8
-            if (aligned <= 0 && !term) go(acc)(tl)
-            else {
-              val (out, rem) = acc.splitAt(aligned)
-              if (term) Pull.output(Chunk.byteVector(out.toByteVector))
-              else Pull.output(Chunk.byteVector(out.toByteVector)) >> go(rem)(tl)
+            mod match {
+              case 0 =>
+                buffer = (cidx & 0x3f)
+                mod += 1
+              case 1 | 2 =>
+                buffer = (buffer << 6) | (cidx & 0x3f)
+                mod += 1
+              case 3 =>
+                buffer = (buffer << 6) | (cidx & 0x3f)
+                mod = 0
+                acc(bidx) = (buffer >> 16).toByte
+                acc(bidx + 1) = (buffer >> 8).toByte
+                acc(bidx + 2) = buffer.toByte
+                bidx += 3
             }
+        }
+        idx += 1
+      }
 
-          } catch {
-            case e: IllegalArgumentException =>
-              Pull.raiseError[F](new Throwable(s"Invalid base 64 encoding at index $idx", e))
+      val paddingInBuffer = if (mod == 0) padding else 0
+      val out = Chunk.byteVector(ByteVector.view(acc).take((bidx - paddingInBuffer).toLong))
+      val carry = State(buffer, mod, padding)
+      Right((carry, out))
+    }
+
+    def finish(state: State): Either[Throwable, Chunk[Byte]] = {
+      if (state.padding != 0 && state.mod != 0) paddingError
+      else
+        state.mod match {
+          case 0 => Right(Chunk.empty)
+          case 1 => Left(new IllegalArgumentException("Final base 64 quantum had only 1 digit - must have at least 2 digits"))
+          case 2 =>
+
+            Right(Chunk((state.buffer >> 4).toByte))
+
+          case 3 =>
+            val buffer = state.buffer
+            Right(
+              Chunk(
+                (buffer >> 10).toByte,
+                (buffer >> 2).toByte
+              )
+            )
+        }
+    }
+
+    def go(state: State, s: Stream[F, String]): Pull[F, Byte, Unit] = {
+
+      /**
+        * In case we encounter unexpected character, split the head and try to decode as two separate base64 data.
+        *
+        * @param err    The unexpected character error.
+        * @param head   The failing string.
+        * @param tail   The rest of the stream.
+        * @param state  The current state of decoding.
+        */
+      def handleUnexpected(
+        err: UnexpectedCharacter
+        , head: String
+        , tail: Stream[F, String]
+        , state: State
+      ): Pull[F, Byte, Unit] = {
+        val (withCurrentState, next) = head.splitAt(err.idx)
+        decode(state, withCurrentState) match {
+          case Left(second) => Pull.raiseError(CompositeFailure.apply(err, second, List.empty))
+          case Right((newState, out)) =>
+            finish(newState) match {
+              case Left(second) => Pull.raiseError(CompositeFailure.apply(err, second, List.empty))
+              case Right(out2) =>
+                Pull.output(out) >>
+                Pull.output(out2) >>
+                go(State(0, 0, 0), Stream.emit(next) ++ tail)
+            }
+        }
+      }
+
+      s.pull.uncons1.flatMap {
+        case Some((hd, tl)) =>
+          decode(state, hd) match {
+            case Right((newState, out)) => Pull.output(out) >> go(newState, tl)
+            case Left(err: UnexpectedCharacter) => handleUnexpected(err, hd, tl, state)
+            case Left(err) => Pull.raiseError(err)
+          }
+        case None =>
+          finish(state) match {
+            case Right(out) => Pull.output(out)
+            case Left(err)  => Pull.raiseError(err)
           }
       }
     }
-    go(BitVector.empty)(_).stream
+
+    in => go(State(0, 0, 0), in).stream
   }
 
-  /** decodes base64 encoded stream [[http://tools.ietf.org/html/rfc4648#section-5 RF4648 section 5]]. Whitespaces are ignored **/
-  def decodeUrl[F[_] : RaiseThrowable]:Pipe[F, Byte, Byte] =
-    decodeRaw(Alphabets.Base64Url)
+  /**
+    * Encodes a byte stream in to a stream of base 64 text.
+    * The default base 64 alphabet is used by this pipe.
+    */
+  def base64Encode[F[_]]: Pipe[F, Byte, String] = base64Encode(Bases.Alphabets.Base64)
 
-  /** decodes base64 encoded stream [[http://tools.ietf.org/html/rfc4648#section-4 RF4648 section 4]] **/
-  def decode[F[_] : RaiseThrowable]:Pipe[F, Byte, Byte] =
-    decodeRaw(Alphabets.Base64)
+  /**
+    * Like [[base64Encode]] but takes a base 64 alphabet. For example,
+    * `base64Encode(Bases.Alphabets.Base64Url)` will encode URL compatible base 64.
+    */
+  def base64Encode[F[_]](alphabet: Bases.Base64Alphabet): Pipe[F, Byte, String] = {
+    // Adapted from scodec-bits, licensed under 3-clause BSD
+    def encode(c: ByteVector): (String, ByteVector) = {
+      val bytes = c.toArray
+      val bldr = CharBuffer.allocate(((bytes.length + 2) / 3) * 4)
+      var idx = 0
+      val mod = bytes.length % 3
+      while (idx < bytes.length - mod) {
+        var buffer = ((bytes(idx) & 0xff) << 16) | ((bytes(idx + 1) & 0xff) << 8) | (bytes(
+          idx + 2
+        ) & 0xff)
+        val fourth = buffer & 0x3f
+        buffer = buffer >> 6
+        val third = buffer & 0x3f
+        buffer = buffer >> 6
+        val second = buffer & 0x3f
+        buffer = buffer >> 6
+        val first = buffer
+        bldr
+          .append(alphabet.toChar(first))
+          .append(alphabet.toChar(second))
+          .append(alphabet.toChar(third))
+          .append(alphabet.toChar(fourth))
+        idx = idx + 3
+      }
+      (bldr: Buffer).flip
+      val out = bldr.toString
+      if (mod == 0) {
+        (out, ByteVector.empty)
+      } else if (mod == 1) {
+        (out, ByteVector(bytes(idx)))
+      } else {
+        (out, ByteVector(bytes(idx), bytes(idx + 1)))
+      }
+    }
+
+    def go(carry: ByteVector, s: Stream[F, Byte]): Pull[F, String, Unit] =
+      s.pull.uncons.flatMap {
+        case Some((hd, tl)) =>
+          val (out, newCarry) = encode(carry ++ interop.toByteVector(hd))
+          Pull.output1(out) >> go(newCarry, tl)
+        case None =>
+          carry.size match {
+            case 0 => Pull.done
+            case 1 =>
+              var buffer = (carry(0) & 0xff) << 4
+              val second = buffer & 0x3f
+              buffer = buffer >> 6
+              val first = buffer
+              val out = new String(
+                Array(alphabet.toChar(first), alphabet.toChar(second), alphabet.pad, alphabet.pad)
+              )
+              Pull.output1(out)
+            case 2 =>
+              var buffer = ((carry(0) & 0xff) << 10) | ((carry(1) & 0xff) << 2)
+              val third = buffer & 0x3f
+              buffer = buffer >> 6
+              val second = buffer & 0x3f
+              buffer = buffer >> 6
+              val first = buffer
+              val out = new String(
+                Array(
+                  alphabet.toChar(first),
+                  alphabet.toChar(second),
+                  alphabet.toChar(third),
+                  alphabet.pad
+                )
+              )
+              Pull.output1(out)
+            case other => sys.error(s"carry must be size 0, 1, or 2 but was $other")
+          }
+      }
+
+    in => go(ByteVector.empty, in).stream
+  }
 
 }

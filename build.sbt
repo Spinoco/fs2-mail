@@ -12,7 +12,7 @@ val fs2Version = "3.12.2"
 
 lazy val commonSettings = Seq(
   organization := "com.spinoco",
-  scalaVersion := "2.12.20",
+  scalaVersion := "2.13.16",
   crossScalaVersions := Seq("2.12.20", "2.13.16"),
   scalacOptions ++= Seq(
     "-feature",

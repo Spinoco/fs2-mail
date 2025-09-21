@@ -10,7 +10,12 @@ object IMAPCommandSpec extends Properties("IMAPCommand"){
 
   property("login") = protect{
 
-    LoginPlainText("user1", "pass1").asIMAPv4 ?= "LOGIN user1 pass1"
+    LoginPlainText("user1", "pass1").asIMAPv4 ?= "LOGIN user1 \"pass1\""
+  }
+
+  property("login xoauth") = protect {
+
+    LoginXOAUTH2("test@contoso.onmicrosoft.com", "EwBAAl3BAAUFFpUAo7J3Ve0bjLBWZWCclRC3EoAA").asIMAPv4 ?= "AUTHENTICATE XOAUTH2 dXNlcj10ZXN0QGNvbnRvc28ub25taWNyb3NvZnQuY29tAWF1dGg9QmVhcmVyIEV3QkFBbDNCQUFVRkZwVUFvN0ozVmUwYmpMQldaV0NjbFJDM0VvQUEBAQ=="
   }
 
   property("logout") = protect{
