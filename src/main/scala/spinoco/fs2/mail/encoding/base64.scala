@@ -53,7 +53,7 @@ object base64 {
     base64Decode(Bases.Alphabets.Base64)
 
   /**
-    * Like [[base64Decode]] but takes a base 64 alphabet. For example,
+    * Like base64Decode but takes a base 64 alphabet. For example,
     * `base64Decode(Bases.Alphabets.Base64Url)` will decode URL compatible base 64.
     */
   def base64Decode[F[_] : RaiseThrowable](alphabet: Bases.Base64Alphabet): Pipe[F, String, Byte] = {
@@ -158,7 +158,7 @@ object base64 {
 
     def go(state: State, s: Stream[F, String]): Pull[F, Byte, Unit] = {
 
-      /**
+       /*
         * In case we encounter unexpected character, split the head and try to decode as two separate base64 data.
         *
         * @param err    The unexpected character error.
@@ -211,7 +211,7 @@ object base64 {
   def base64Encode[F[_]]: Pipe[F, Byte, String] = base64Encode(Bases.Alphabets.Base64)
 
   /**
-    * Like [[base64Encode]] but takes a base 64 alphabet. For example,
+    * Like base64Encode but takes a base 64 alphabet. For example,
     * `base64Encode(Bases.Alphabets.Base64Url)` will encode URL compatible base 64.
     */
   def base64Encode[F[_]](alphabet: Bases.Base64Alphabet): Pipe[F, Byte, String] = {

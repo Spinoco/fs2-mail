@@ -298,7 +298,7 @@ object SMTPClient {
       Stream.chunk(Chunk.byteVector(ByteVector.view((s + "\r\n").getBytes)))
 
 
-    /** issues EHLO $domain command **/
+    /** issues EHLO domain command **/
     def connect[F[_]](domain: String): Stream[F, Byte] = command(s"EHLO $domain")
 
 
