@@ -36,8 +36,8 @@ object charset {
     encode(StandardCharsets.UTF_8)
 
   /** decodes bytes given supplied charset into stream of utf8 strings **/
-  def decode[F[_]](chs: Charset)(implicit F: Sync[F]): Pipe[F, Byte, Char] = { s =>
-    Stream.eval(F.delay(
+  def decode[F[_] : Sync](chs: Charset): Pipe[F, Byte, Char] = { s =>
+    Stream.eval(Sync[F].delay(
       chs.newDecoder()
         .onMalformedInput(CodingErrorAction.REPLACE)
         .onUnmappableCharacter(CodingErrorAction.REPLACE)
@@ -68,7 +68,7 @@ object charset {
 
           case None =>
             def flush: Pull[F, Char, Unit] = {
-              Pull.eval(F.delay(impl.decodeFlush(decoder))) flatMap { case (result, out) => result match {
+              Pull.eval(Sync[F].delay(impl.decodeFlush(decoder))) flatMap { case (result, out) => result match {
                 case CoderResult.OVERFLOW =>
                   Pull.raiseError(new Throwable("Unexpected Decoding Overflow (flush)")) // impossible
 
@@ -108,8 +108,8 @@ object charset {
     * For certaion encoding (i.e. UTF-16) this may present unnecessary characters to eb emitted (magic bytes, headers)
     *
     */
-  def encode[F[_]](chs: Charset)(implicit F: Sync[F]): Pipe[F, Char, Byte] = { s =>
-    Stream.eval(F.delay(chs.newEncoder())) flatMap { encoder =>
+  def encode[F[_] : Sync](chs: Charset): Pipe[F, Char, Byte] = { s =>
+    Stream.eval(Sync[F].delay(chs.newEncoder())) flatMap { encoder =>
 
       def go(buff: String)(s: Stream[F, Char]): Pull[F, Byte, Unit] = {
         s.pull.uncons flatMap {
@@ -133,7 +133,7 @@ object charset {
 
           case None =>
             def flush: Pull[F, Byte, Unit] = {
-              Pull.eval(F.delay(impl.encodeFlush(encoder))) flatMap { case (result, out) => result match {
+              Pull.eval(Sync[F].delay(impl.encodeFlush(encoder))) flatMap { case (result, out) => result match {
                 case CoderResult.OVERFLOW =>
                   Pull.raiseError(new Throwable("Unexpected Encoding Overflow (flush)")) // impossible
 

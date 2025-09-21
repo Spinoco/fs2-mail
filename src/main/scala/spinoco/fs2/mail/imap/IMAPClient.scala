@@ -452,7 +452,7 @@ object IMAPClient {
       * @tparam F
       * @return
       */
-    def fetchBytesOf[F[_] : RaiseThrowable](
+    def fetchBytesOf[F[_] : Sync](
       contentIdx: Int
       , contentKey: String
       , encoding: String

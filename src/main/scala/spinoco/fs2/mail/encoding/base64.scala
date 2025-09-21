@@ -1,12 +1,10 @@
 package spinoco.fs2.mail.encoding
 
 import java.nio.{Buffer, CharBuffer}
-
 import cats.effect.Sync
 import fs2._
 import scodec.bits.Bases.{Alphabets, Base64Alphabet}
 import scodec.bits.{Bases, ByteVector}
-import spinoco.fs2.mail.interop
 import spinoco.fs2.mail.interop.StringChunk
 
 
@@ -15,7 +13,7 @@ object base64 {
   def encodeRaw[F[_]](alphabet: Base64Alphabet):Pipe[F, Byte, Byte] = { source =>
     source
     .through(base64Encode[F](alphabet))
-    .flatMap(s => Stream.chunk(Chunk.bytes(s.getBytes)))
+    .flatMap(s => Stream.chunk(Chunk.byteVector(ByteVector.view(s.getBytes))))
   }
 
   /** encodes base64 encoded stream [[http://tools.ietf.org/html/rfc4648#section-5 RF4648 section 5]]. Whitespaces are ignored **/
@@ -51,14 +49,14 @@ object base64 {
     *
     * The default base 64 alphabet is used by this pipe.
     */
-  def base64Decode[F[_]]: Pipe[F, String, Byte] =
+  def base64Decode[F[_] : RaiseThrowable]: Pipe[F, String, Byte] =
     base64Decode(Bases.Alphabets.Base64)
 
   /**
     * Like [[base64Decode]] but takes a base 64 alphabet. For example,
     * `base64Decode(Bases.Alphabets.Base64Url)` will decode URL compatible base 64.
     */
-  def base64Decode[F[_]](alphabet: Bases.Base64Alphabet): Pipe[F, String, Byte] = {
+  def base64Decode[F[_] : RaiseThrowable](alphabet: Bases.Base64Alphabet): Pipe[F, String, Byte] = {
     // Adapted from scodec-bits, licensed under 3-clause BSD
     final case class State(buffer: Int, mod: Int, padding: Int)
     val Pad = alphabet.pad
@@ -176,10 +174,10 @@ object base64 {
       ): Pull[F, Byte, Unit] = {
         val (withCurrentState, next) = head.splitAt(err.idx)
         decode(state, withCurrentState) match {
-          case Left(second) => Pull.raiseError(CompositeFailure.apply(err, second, List.empty))
+          case Left(second) => Pull.raiseError[F](CompositeFailure.apply(err, second, List.empty))
           case Right((newState, out)) =>
             finish(newState) match {
-              case Left(second) => Pull.raiseError(CompositeFailure.apply(err, second, List.empty))
+              case Left(second) => Pull.raiseError[F](CompositeFailure.apply(err, second, List.empty))
               case Right(out2) =>
                 Pull.output(out) >>
                 Pull.output(out2) >>
@@ -255,7 +253,7 @@ object base64 {
     def go(carry: ByteVector, s: Stream[F, Byte]): Pull[F, String, Unit] =
       s.pull.uncons.flatMap {
         case Some((hd, tl)) =>
-          val (out, newCarry) = encode(carry ++ interop.toByteVector(hd))
+          val (out, newCarry) = encode(carry ++ hd.toByteVector)
           Pull.output1(out) >> go(newCarry, tl)
         case None =>
           carry.size match {

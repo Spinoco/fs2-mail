@@ -64,8 +64,8 @@ object base64Spec extends Properties("base64") {
     val encoded = ByteVector.view(sample.text.getBytes).toBase64(sample.alphabet)
 
     val source = {
-      Stream.chunk[IO, Byte](Chunk.bytes(encoded.getBytes)).covary[IO] ++
-      Stream.chunk[IO, Byte](Chunk.bytes(encoded.getBytes)).covary[IO]
+      Stream.chunk[IO, Byte](Chunk.byteVector(ByteVector.view(encoded.getBytes))).covary[IO] ++
+      Stream.chunk[IO, Byte](Chunk.byteVector(ByteVector.view(encoded.getBytes))).covary[IO]
     }.bufferAll
 
     source
@@ -84,7 +84,7 @@ object base64Spec extends Properties("base64") {
     val encoded = ByteVector.view(sample.text.getBytes).toBase64(sample.alphabet)
 
     val source = {
-      Stream.chunk[IO, Byte](Chunk.bytes((encoded+encoded).getBytes)).covary[IO]
+      Stream.chunk[IO, Byte](Chunk.byteVector(ByteVector.view((encoded+encoded).getBytes))).covary[IO]
     }.bufferAll
 
     source
