@@ -4,7 +4,7 @@ import shapeless.tag.@@
 
 import scala.util.Try
 import scala.util.matching.Regex
-import shapeless.{Lens, tag}
+import shapeless.{Lens, lens, tag}
 
 import scala.annotation.tailrec
 
@@ -54,34 +54,13 @@ object  IMAPMailboxStatus {
     val patternUidNext = """\s*OK\s+\[\s*UIDNEXT\s+(\d+)\s*\].*""".r
     val patternUidValidity = """\s*OK\s+\[\s*UIDVALIDITY\s+(\d+)\s*\].*""".r
 
-    val lensExists = new Lens[IMAPMailboxStatus, Int] {
-      def get(s: IMAPMailboxStatus) = s.exists
-      def set(s: IMAPMailboxStatus)(a: Int) = s.copy(exists = a)
-    }
-    val lensRecent = new Lens[IMAPMailboxStatus, Int] {
-      def get(s: IMAPMailboxStatus) = s.recent
-      def set(s: IMAPMailboxStatus)(a: Int) = s.copy(recent = a)
-    }
-    val lensUnseen = new Lens[IMAPMailboxStatus, Option[Int]] {
-      def get(s: IMAPMailboxStatus) = s.unseen
-      def set(s: IMAPMailboxStatus)(a: Option[Int]) = s.copy(unseen = a)
-    }
-    val lensFlags = new Lens[IMAPMailboxStatus, Seq[String]] {
-      def get(s: IMAPMailboxStatus) = s.flags
-      def set(s: IMAPMailboxStatus)(a: Seq[String]) = s.copy(flags = a)
-    }
-    val lensPermanentFlags = new Lens[IMAPMailboxStatus, Seq[String]] {
-      def get(s: IMAPMailboxStatus) = s.permanentFlags
-      def set(s: IMAPMailboxStatus)(a: Seq[String]) = s.copy(permanentFlags = a)
-    }
-    val lensUidNext = new Lens[IMAPMailboxStatus, Long @@ MailUID] {
-      def get(s: IMAPMailboxStatus) = s.uidNext
-      def set(s: IMAPMailboxStatus)(a: @@[Long, MailUID]) = s.copy(uidNext = a)
-    }
-    val lensUidValidity = new Lens[IMAPMailboxStatus, Option[Long]] {
-      def get(s: IMAPMailboxStatus) = s.uidValidity
-      def set(s: IMAPMailboxStatus)(a: Option[Long]) = s.copy(uidValidity = a)
-    }
+    val lensExists = lens[IMAPMailboxStatus] >> Symbol("exists")
+    val lensRecent = lens[IMAPMailboxStatus] >> Symbol("recent")
+    val lensUnseen = lens[IMAPMailboxStatus] >> Symbol("unseen")
+    val lensFlags = lens[IMAPMailboxStatus] >> Symbol("flags")
+    val lensPermanentFlags = lens[IMAPMailboxStatus] >> Symbol("permanentFlags")
+    val lensUidNext = lens[IMAPMailboxStatus] >> Symbol("uidNext")
+    val lensUidValidity = lens[IMAPMailboxStatus] >> Symbol("uidValidity")
 
     /*
      * Used to construct patterns, that are used to match lines and then modify status of mailbox
