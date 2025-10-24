@@ -1,7 +1,7 @@
 package spinoco.fs2.mail.smtp
 
 import cats.effect.std.Semaphore
-import cats.effect.{Async, Deferred, Ref, Sync}
+import cats.effect.{Async, Deferred, Ref, Resource, Sync}
 import cats.syntax.all._
 import fs2.{Chunk, _}
 import fs2.io.net.Socket
@@ -32,10 +32,11 @@ trait SMTPClient[F[_]] {
 
   /**
     * Connects with SMTP server. Returns a list of supported extensions of this server.
+    * It is connection, that may require tls, and so it is wrapped in Resource
     * @param domain domain name to present on HELO/EHLO
     * @return
     */
-  def connect(domain: String): F[Seq[String]]
+  def connect(domain: String): Resource[F, Seq[String]]
 
   /** login to SMTP server with supplied user and password. This is equivalent to AUTH LOGIN **/
   def login(userName: String, password: String): F[Unit]
@@ -107,7 +108,7 @@ object SMTPClient {
     , emailHeaderCodec: Codec[EmailHeader] = EmailHeaderCodec.codec(100 * 1024) // 100K max header size
     , mimeHeaderCodec: Codec[MIMEHeader] = EmailHeaderCodec.mimeCodec(10 * 1024) // 10K for mime shall be enough
   ): Stream[F, SMTPClient[F]] =
-    SMTPClient.mk(socket, (_: Socket[F]) => Async[F].pure(socket), initialHandshakeTimeout, sendTimeout, false, emailHeaderCodec, mimeHeaderCodec)
+    SMTPClient.mk(socket, (_: Socket[F]) => Resource.pure(socket), initialHandshakeTimeout, sendTimeout, false, emailHeaderCodec, mimeHeaderCodec)
 
   /**
    * Creates SMTP client with STARTTLS enabled. Once stream is run, the client connects to server and expects server to
@@ -117,7 +118,7 @@ object SMTPClient {
    */
   def startTlsClient[F[_]: Async](
     socket: Socket[F]
-    , tlsHandshake: Socket[F] => F[Socket[F]]
+    , tlsHandshake: Socket[F] => Resource[F, Socket[F]]
     , initialHandshakeTimeout: FiniteDuration
     , sendTimeout: FiniteDuration
     , emailHeaderCodec: Codec[EmailHeader] = EmailHeaderCodec.codec(100 * 1024) // 100K max header size
@@ -132,7 +133,7 @@ object SMTPClient {
     */
   def mk[F[_]: Async](
     socket: Socket[F]
-    , tlsHandshake: Socket[F] => F[Socket[F]]
+    , tlsHandshake: Socket[F] => Resource[F, Socket[F]]
     , initialHandshakeTimeout: FiniteDuration
     , sendTimeout: FiniteDuration
     , startTls: Boolean = false
@@ -156,12 +157,14 @@ object SMTPClient {
       Stream.eval(initialize) map { _ =>
       new SMTPClient[F] {
         def serverId: F[String] = serverIdRef.get
-        def connect(domain: String): F[Seq[String]] = {
-          sendRequest(impl.connect(domain)).map(_.map(_.data)).flatMap { response =>
-            tlsConnection.get.flatMap {
-              case true => Sync[F].pure(response)
-              case false =>
-                impl.startTls(response, tlsHandshake) >> sendRequest(impl.connect(domain)).map(_.map(_.data))
+        def connect(domain: String): Resource[F, Seq[String]] = {
+          Resource.eval(sendRequest(impl.connect(domain)).map(_.map(_.data))).flatMap { response =>
+          Resource.eval(tlsConnection.get).flatMap {
+            case true => Resource.eval(Sync[F].pure(response))
+            case false =>
+              impl.startTls(response, tlsHandshake).flatMap { _ =>
+                Resource.eval(sendRequest(impl.connect(domain)).map(_.map(_.data)))
+              }
             }
           }
         }
@@ -352,11 +355,11 @@ object SMTPClient {
       }
     }
 
-    def startTls[F[_] : Sync](connectResponse: Seq[String], tlsHandshake: Socket[F] => F[Socket[F]])(
+    def startTls[F[_] : Sync](connectResponse: Seq[String], tlsHandshake: Socket[F] => Resource[F,Socket[F]])(
       implicit send: Stream[F, Byte] => F[Seq[SMTPResponse]]
       , socketRef: Ref[F, Socket[F]]
       , tlsConnection: Ref[F, Boolean]
-    ): F[Unit] = {
+    ): Resource[F, Unit] = {
       val startTlsCommand: F[Unit] = send(command("STARTTLS")) flatMap { resp =>
         resp.headOption match {
           case Some(resp@SMTPResponse(code, _)) =>
@@ -368,13 +371,15 @@ object SMTPClient {
       }
 
       if (connectResponse.exists(_.contains("STARTTLS"))) {
-        startTlsCommand >>
-        socketRef.get.flatMap(tlsHandshake).flatMap { s =>
-          socketRef.set(s) >>
-          tlsConnection.set(true)
-        }
+        Resource.eval(startTlsCommand).flatMap { _ =>
+        Resource.eval(socketRef.get).flatMap(tlsHandshake).flatMap { s =>
+          Resource.eval(
+            socketRef.set(s) >>
+            tlsConnection.set(true)
+          )
+        }}
       } else {
-        Sync[F].raiseError(new Throwable("Connection doesn't support STARTTLS"))
+        Resource.eval(Sync[F].raiseError(new Throwable("Connection doesn't support STARTTLS")))
       }
     }
 
